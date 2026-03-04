@@ -40,6 +40,18 @@ interface ArticleOptions {
   imageMediaIds?: string[];
 }
 
+interface ImageGenConfig {
+  apiKey: string;
+  apiBase: string;
+  model: string;
+  size: string;
+}
+
+interface ImageGenResponse {
+  data?: Array<{ url?: string; b64_json?: string }>;
+  error?: { message: string };
+}
+
 const TOKEN_URL = "https://api.weixin.qq.com/cgi-bin/token";
 const UPLOAD_URL = "https://api.weixin.qq.com/cgi-bin/material/add_material";
 const DRAFT_URL = "https://api.weixin.qq.com/cgi-bin/draft/add";
@@ -56,8 +68,10 @@ function loadEnvFile(envPath: string): Record<string, string> {
     if (eqIdx > 0) {
       const key = trimmed.slice(0, eqIdx).trim();
       let value = trimmed.slice(eqIdx + 1).trim();
-      if ((value.startsWith('"') && value.endsWith('"')) ||
-          (value.startsWith("'") && value.endsWith("'"))) {
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
         value = value.slice(1, -1);
       }
       env[key] = value;
@@ -73,26 +87,203 @@ function loadConfig(): WechatConfig {
   const cwdEnv = loadEnvFile(cwdEnvPath);
   const homeEnv = loadEnvFile(homeEnvPath);
 
-  const appId = process.env.WECHAT_APP_ID || cwdEnv.WECHAT_APP_ID || homeEnv.WECHAT_APP_ID;
-  const appSecret = process.env.WECHAT_APP_SECRET || cwdEnv.WECHAT_APP_SECRET || homeEnv.WECHAT_APP_SECRET;
+  const appId =
+    process.env.WECHAT_APP_ID || cwdEnv.WECHAT_APP_ID || homeEnv.WECHAT_APP_ID;
+  const appSecret =
+    process.env.WECHAT_APP_SECRET ||
+    cwdEnv.WECHAT_APP_SECRET ||
+    homeEnv.WECHAT_APP_SECRET;
 
   if (!appId || !appSecret) {
     throw new Error(
       "Missing WECHAT_APP_ID or WECHAT_APP_SECRET.\n" +
-      "Set via environment variables or in .baoyu-skills/.env file."
+        "Set via environment variables or in .baoyu-skills/.env file.",
     );
   }
 
   return { appId, appSecret };
 }
 
-async function fetchAccessToken(appId: string, appSecret: string): Promise<string> {
+function loadImageGenConfig(): ImageGenConfig | null {
+  const cwdEnvPath = path.join(process.cwd(), ".baoyu-skills", ".env");
+  const homeEnvPath = path.join(os.homedir(), ".baoyu-skills", ".env");
+
+  const cwdEnv = loadEnvFile(cwdEnvPath);
+  const homeEnv = loadEnvFile(homeEnvPath);
+
+  const apiKey =
+    process.env.IMAGE_API_KEY || cwdEnv.IMAGE_API_KEY || homeEnv.IMAGE_API_KEY;
+
+  if (!apiKey) return null;
+
+  return {
+    apiKey,
+    apiBase:
+      process.env.IMAGE_API_BASE ||
+      cwdEnv.IMAGE_API_BASE ||
+      homeEnv.IMAGE_API_BASE ||
+      "https://api.openai.com/v1",
+    model:
+      process.env.IMAGE_MODEL ||
+      cwdEnv.IMAGE_MODEL ||
+      homeEnv.IMAGE_MODEL ||
+      "dall-e-3",
+    size:
+      process.env.IMAGE_SIZE ||
+      cwdEnv.IMAGE_SIZE ||
+      homeEnv.IMAGE_SIZE ||
+      "1792x1024",
+  };
+}
+
+async function generateImage(
+  prompt: string,
+  config: ImageGenConfig,
+): Promise<Buffer> {
+  const url = `${config.apiBase.replace(/\/+$/, "")}/images/generations`;
+
+  console.error(`[wechat-api] Generating image: ${prompt.slice(0, 80)}...`);
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${config.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: config.model,
+      prompt,
+      n: 1,
+      size: config.size,
+      response_format: "url",
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Image generation API error ${res.status}: ${errText}`);
+  }
+
+  const data = (await res.json()) as ImageGenResponse;
+
+  if (data.error) {
+    throw new Error(`Image generation failed: ${data.error.message}`);
+  }
+
+  if (!data.data || data.data.length === 0) {
+    throw new Error("No image returned from API");
+  }
+
+  const imageData = data.data[0]!;
+
+  if (imageData.b64_json) {
+    return Buffer.from(imageData.b64_json, "base64");
+  }
+
+  if (imageData.url) {
+    const imgRes = await fetch(imageData.url);
+    if (!imgRes.ok) {
+      throw new Error(`Failed to download generated image: ${imgRes.status}`);
+    }
+    return Buffer.from(await imgRes.arrayBuffer());
+  }
+
+  throw new Error("No url or b64_json in image generation response");
+}
+
+async function processGeneratedImages(
+  html: string,
+  accessToken: string,
+): Promise<string> {
+  const imageGenConfig = loadImageGenConfig();
+  const genRegex = /<img[^>]*\ssrc=["']__generate:([^"']+)__["'][^>]*>/gi;
+  const matches = [...html.matchAll(genRegex)];
+
+  if (matches.length === 0) return html;
+
+  if (!imageGenConfig) {
+    console.error(
+      "[wechat-api] WARNING: Found __generate: image placeholders but IMAGE_API_KEY not configured. Skipping generation.",
+    );
+    return html;
+  }
+
+  let updatedHtml = html;
+
+  for (const match of matches) {
+    const [fullTag, prompt] = match;
+    if (!prompt) continue;
+
+    try {
+      const imageBuffer = await generateImage(prompt, imageGenConfig);
+      const filename = `generated-${Date.now()}.png`;
+
+      // 上传到微信素材库
+      const boundary = `----WebKitFormBoundary${Date.now().toString(16)}`;
+      const header = [
+        `--${boundary}`,
+        `Content-Disposition: form-data; name="media"; filename="${filename}"`,
+        `Content-Type: image/png`,
+        "",
+        "",
+      ].join("\r\n");
+      const footer = `\r\n--${boundary}--\r\n`;
+
+      const headerBuffer = Buffer.from(header, "utf-8");
+      const footerBuffer = Buffer.from(footer, "utf-8");
+      const body = Buffer.concat([headerBuffer, imageBuffer, footerBuffer]);
+
+      const uploadUrl = `${UPLOAD_URL}?access_token=${accessToken}&type=image`;
+      const uploadRes = await fetch(uploadUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": `multipart/form-data; boundary=${boundary}`,
+        },
+        body,
+      });
+
+      const uploadData = (await uploadRes.json()) as UploadResponse;
+      if (uploadData.errcode && uploadData.errcode !== 0) {
+        throw new Error(
+          `Upload failed ${uploadData.errcode}: ${uploadData.errmsg}`,
+        );
+      }
+
+      let cdnUrl = uploadData.url;
+      if (cdnUrl?.startsWith("http://")) {
+        cdnUrl = cdnUrl.replace(/^http:\/\//i, "https://");
+      }
+
+      const newTag = fullTag.replace(
+        /\ssrc=["']__generate:[^"']+__["']/,
+        ` src="${cdnUrl}"`,
+      );
+      updatedHtml = updatedHtml.replace(fullTag, newTag);
+
+      console.error(
+        `[wechat-api] Generated and uploaded image for: ${prompt.slice(0, 50)}...`,
+      );
+    } catch (err) {
+      console.error(
+        `[wechat-api] Failed to generate image for "${prompt.slice(0, 50)}...":`,
+        err,
+      );
+    }
+  }
+
+  return updatedHtml;
+}
+
+async function fetchAccessToken(
+  appId: string,
+  appSecret: string,
+): Promise<string> {
   const url = `${TOKEN_URL}?grant_type=client_credential&appid=${appId}&secret=${appSecret}`;
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`Failed to fetch access token: ${res.status}`);
   }
-  const data = await res.json() as AccessTokenResponse;
+  const data = (await res.json()) as AccessTokenResponse;
   if (data.errcode) {
     throw new Error(`Access token error ${data.errcode}: ${data.errmsg}`);
   }
@@ -105,7 +296,7 @@ async function fetchAccessToken(appId: string, appSecret: string): Promise<strin
 async function uploadImage(
   imagePath: string,
   accessToken: string,
-  baseDir?: string
+  baseDir?: string,
 ): Promise<UploadResponse> {
   let fileBuffer: Buffer;
   let filename: string;
@@ -149,6 +340,33 @@ async function uploadImage(
     contentType = mimeTypes[ext] || "image/jpeg";
   }
 
+  // 检测 webp 魔术字节并转换为 PNG（微信 API 不支持 webp）
+  if (
+    fileBuffer.length >= 12 &&
+    fileBuffer.slice(0, 4).toString("ascii") === "RIFF" &&
+    fileBuffer.slice(8, 12).toString("ascii") === "WEBP"
+  ) {
+    console.error("[wechat-api] Detected WebP image, converting to PNG...");
+    const tmpWebp = path.join(os.tmpdir(), `postwx-${Date.now()}.webp`);
+    const tmpPng = tmpWebp.replace(/\.webp$/, ".png");
+    fs.writeFileSync(tmpWebp, fileBuffer);
+    const sipsResult = spawnSync(
+      "sips",
+      ["-s", "format", "png", tmpWebp, "--out", tmpPng],
+      {
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    if (sipsResult.status !== 0) {
+      throw new Error(
+        `WebP to PNG conversion failed: ${sipsResult.stderr?.toString()}`,
+      );
+    }
+    fileBuffer = fs.readFileSync(tmpPng);
+    filename = filename.replace(/\.webp$/i, ".png");
+    contentType = "image/png";
+  }
+
   const boundary = `----WebKitFormBoundary${Date.now().toString(16)}`;
   const header = [
     `--${boundary}`,
@@ -172,7 +390,7 @@ async function uploadImage(
     body,
   });
 
-  const data = await res.json() as UploadResponse;
+  const data = (await res.json()) as UploadResponse;
   if (data.errcode && data.errcode !== 0) {
     throw new Error(`Upload failed ${data.errcode}: ${data.errmsg}`);
   }
@@ -187,7 +405,7 @@ async function uploadImage(
 async function uploadImagesInHtml(
   html: string,
   accessToken: string,
-  baseDir: string
+  baseDir: string,
 ): Promise<{ html: string; firstMediaId: string; allMediaIds: string[] }> {
   const imgRegex = /<img[^>]*\ssrc=["']([^"']+)["'][^>]*>/gi;
   const matches = [...html.matchAll(imgRegex)];
@@ -235,7 +453,7 @@ async function uploadImagesInHtml(
 
 async function publishToDraft(
   options: ArticleOptions,
-  accessToken: string
+  accessToken: string,
 ): Promise<PublishResponse> {
   const url = `${DRAFT_URL}?access_token=${accessToken}`;
 
@@ -252,7 +470,7 @@ async function publishToDraft(
       need_open_comment: 1,
       only_fans_can_comment: 0,
       image_info: {
-        image_list: options.imageMediaIds.map(id => ({ image_media_id: id })),
+        image_list: options.imageMediaIds.map((id) => ({ image_media_id: id })),
       },
     };
     if (options.author) article.author = options.author;
@@ -277,7 +495,7 @@ async function publishToDraft(
     body: JSON.stringify({ articles: [article] }),
   });
 
-  const data = await res.json() as PublishResponse;
+  const data = (await res.json()) as PublishResponse;
   if (data.errcode && data.errcode !== 0) {
     throw new Error(`Publish failed ${data.errcode}: ${data.errmsg}`);
   }
@@ -285,7 +503,10 @@ async function publishToDraft(
   return data;
 }
 
-function parseFrontmatter(content: string): { frontmatter: Record<string, string>; body: string } {
+function parseFrontmatter(content: string): {
+  frontmatter: Record<string, string>;
+  body: string;
+} {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
   if (!match) return { frontmatter: {}, body: content };
 
@@ -296,8 +517,10 @@ function parseFrontmatter(content: string): { frontmatter: Record<string, string
     if (colonIdx > 0) {
       const key = line.slice(0, colonIdx).trim();
       let value = line.slice(colonIdx + 1).trim();
-      if ((value.startsWith('"') && value.endsWith('"')) ||
-          (value.startsWith("'") && value.endsWith("'"))) {
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
         value = value.slice(1, -1);
       }
       frontmatter[key] = value;
@@ -307,16 +530,29 @@ function parseFrontmatter(content: string): { frontmatter: Record<string, string
   return { frontmatter, body: match[2]! };
 }
 
-function renderMarkdownToHtml(markdownPath: string, theme: string = "default", color?: string): string {
+function renderMarkdownToHtml(
+  markdownPath: string,
+  theme: string = "default",
+  color?: string,
+): string {
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);
   const renderScript = path.join(__dirname, "md", "render.ts");
   const baseDir = path.dirname(markdownPath);
 
-  const renderArgs = ["-y", "bun", renderScript, markdownPath, "--theme", theme];
+  const renderArgs = [
+    "-y",
+    "bun",
+    renderScript,
+    markdownPath,
+    "--theme",
+    theme,
+  ];
   if (color) renderArgs.push("--color", color);
 
-  console.error(`[wechat-api] Rendering markdown with theme: ${theme}${color ? `, color: ${color}` : ""}`);
+  console.error(
+    `[wechat-api] Rendering markdown with theme: ${theme}${color ? `, color: ${color}` : ""}`,
+  );
   const result = spawnSync("npx", renderArgs, {
     stdio: ["inherit", "pipe", "pipe"],
     cwd: baseDir,
@@ -441,7 +677,11 @@ function parseArgs(argv: string[]): CliArgs {
       args.cover = argv[++i];
     } else if (arg === "--dry-run") {
       args.dryRun = true;
-    } else if (arg.startsWith("--") && argv[i + 1] && !argv[i + 1]!.startsWith("-")) {
+    } else if (
+      arg.startsWith("--") &&
+      argv[i + 1] &&
+      !argv[i + 1]!.startsWith("-")
+    ) {
       i++;
     } else if (!arg.startsWith("-")) {
       args.filePath = arg;
@@ -493,7 +733,12 @@ async function main(): Promise<void> {
       frontmatter = parsed.frontmatter;
       if (!title && frontmatter.title) title = frontmatter.title;
       if (!author) author = frontmatter.author || "";
-      if (!digest) digest = frontmatter.digest || frontmatter.summary || frontmatter.description || "";
+      if (!digest)
+        digest =
+          frontmatter.digest ||
+          frontmatter.summary ||
+          frontmatter.description ||
+          "";
     }
     if (!title) {
       title = extractHtmlTitle(fs.readFileSync(htmlPath, "utf-8"));
@@ -511,23 +756,56 @@ async function main(): Promise<void> {
       if (h1Match) title = h1Match[1]!;
     }
     if (!author) author = frontmatter.author || "";
-    if (!digest) digest = frontmatter.digest || frontmatter.summary || frontmatter.description || "";
+    if (!digest)
+      digest =
+        frontmatter.digest ||
+        frontmatter.summary ||
+        frontmatter.description ||
+        "";
 
-    console.error(`[wechat-api] Theme: ${args.theme}${args.color ? `, color: ${args.color}` : ""}`);
-    htmlPath = renderMarkdownToHtml(filePath, args.theme, args.color);
+    // 预处理: 将 ![alt](__generate:prompt__) 转为 HTML img 标签，防止 __ 被渲染为粗体
+    const generateImgRegex = /!\[([^\]]*)\]\(__generate:(.+?)__\)/g;
+    let renderFilePath = filePath;
+    if (generateImgRegex.test(body)) {
+      const preprocessed = body.replace(
+        /!\[([^\]]*)\]\(__generate:(.+?)__\)/g,
+        '<img src="__generate:$2__" alt="$1">',
+      );
+      const tmpDir = os.tmpdir();
+      const tmpFile = path.join(tmpDir, `postwx-${Date.now()}.md`);
+      // 保留 frontmatter + 替换后的 body
+      const originalContent = fs.readFileSync(filePath, "utf-8");
+      const fmMatch = originalContent.match(/^(---\r?\n[\s\S]*?\r?\n---\r?\n)/);
+      const fmPart = fmMatch ? fmMatch[1] : "";
+      fs.writeFileSync(tmpFile, fmPart + preprocessed, "utf-8");
+      renderFilePath = tmpFile;
+    }
+
+    console.error(
+      `[wechat-api] Theme: ${args.theme}${args.color ? `, color: ${args.color}` : ""}`,
+    );
+    htmlPath = renderMarkdownToHtml(renderFilePath, args.theme, args.color);
     console.error(`[wechat-api] HTML generated: ${htmlPath}`);
     htmlContent = extractHtmlContent(htmlPath);
   }
 
   if (!title) {
-    console.error("Error: No title found. Provide via --title, frontmatter, or <title> tag.");
+    console.error(
+      "Error: No title found. Provide via --title, frontmatter, or <title> tag.",
+    );
     process.exit(1);
   }
 
   if (digest && digest.length > 120) {
     const truncated = digest.slice(0, 117);
-    const lastPunct = Math.max(truncated.lastIndexOf("。"), truncated.lastIndexOf("，"), truncated.lastIndexOf("；"), truncated.lastIndexOf("、"));
-    digest = lastPunct > 80 ? truncated.slice(0, lastPunct + 1) : truncated + "...";
+    const lastPunct = Math.max(
+      truncated.lastIndexOf("。"),
+      truncated.lastIndexOf("，"),
+      truncated.lastIndexOf("；"),
+      truncated.lastIndexOf("、"),
+    );
+    digest =
+      lastPunct > 80 ? truncated.slice(0, lastPunct + 1) : truncated + "...";
     console.error(`[wechat-api] Digest truncated to ${digest.length} chars`);
   }
 
@@ -537,14 +815,20 @@ async function main(): Promise<void> {
   console.error(`[wechat-api] Type: ${args.articleType}`);
 
   if (args.dryRun) {
-    console.log(JSON.stringify({
-      articleType: args.articleType,
-      title,
-      author: author || undefined,
-      digest: digest || undefined,
-      htmlPath,
-      contentLength: htmlContent.length,
-    }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          articleType: args.articleType,
+          title,
+          author: author || undefined,
+          digest: digest || undefined,
+          htmlPath,
+          contentLength: htmlContent.length,
+        },
+        null,
+        2,
+      ),
+    );
     return;
   }
 
@@ -552,31 +836,63 @@ async function main(): Promise<void> {
   console.error("[wechat-api] Fetching access token...");
   const accessToken = await fetchAccessToken(config.appId, config.appSecret);
 
+  // 先处理 AI 生成图片占位符（__generate:prompt__）
+  console.error("[wechat-api] Processing generated images...");
+  htmlContent = await processGeneratedImages(htmlContent, accessToken);
+
+  // 再上传所有图片（本地 + 远程 + 已生成的）
   console.error("[wechat-api] Uploading images...");
-  const { html: processedHtml, firstMediaId, allMediaIds } = await uploadImagesInHtml(
-    htmlContent,
-    accessToken,
-    baseDir
-  );
+  const {
+    html: processedHtml,
+    firstMediaId,
+    allMediaIds,
+  } = await uploadImagesInHtml(htmlContent, accessToken, baseDir);
   htmlContent = processedHtml;
 
   let thumbMediaId = "";
-  const rawCoverPath = args.cover ||
+  const rawCoverPath =
+    args.cover ||
     frontmatter.coverImage ||
     frontmatter.featureImage ||
     frontmatter.cover ||
     frontmatter.image;
-  const coverPath = rawCoverPath && !path.isAbsolute(rawCoverPath) && args.cover
-    ? path.resolve(process.cwd(), rawCoverPath)
-    : rawCoverPath;
+  const coverPath =
+    rawCoverPath && !path.isAbsolute(rawCoverPath) && args.cover
+      ? path.resolve(process.cwd(), rawCoverPath)
+      : rawCoverPath;
 
-  if (coverPath) {
+  if (
+    coverPath &&
+    coverPath.startsWith("__generate:") &&
+    coverPath.endsWith("__")
+  ) {
+    // AI 生成封面图
+    const imageGenConfig = loadImageGenConfig();
+    if (!imageGenConfig) {
+      console.error(
+        "Error: --cover uses __generate: but IMAGE_API_KEY not configured.",
+      );
+      process.exit(1);
+    }
+    const prompt = coverPath.slice("__generate:".length, -2);
+    console.error(
+      `[wechat-api] Generating cover image: ${prompt.slice(0, 80)}...`,
+    );
+    const imageBuffer = await generateImage(prompt, imageGenConfig);
+    const tmpCover = path.join(os.tmpdir(), `postwx-cover-${Date.now()}.png`);
+    fs.writeFileSync(tmpCover, imageBuffer);
+    console.error(`[wechat-api] Uploading generated cover: ${tmpCover}`);
+    const coverResp = await uploadImage(tmpCover, accessToken, baseDir);
+    thumbMediaId = coverResp.media_id;
+  } else if (coverPath) {
     console.error(`[wechat-api] Uploading cover: ${coverPath}`);
     const coverResp = await uploadImage(coverPath, accessToken, baseDir);
     thumbMediaId = coverResp.media_id;
   } else if (firstMediaId) {
     if (firstMediaId.startsWith("https://")) {
-      console.error(`[wechat-api] Uploading first image as cover: ${firstMediaId}`);
+      console.error(
+        `[wechat-api] Uploading first image as cover: ${firstMediaId}`,
+      );
       const coverResp = await uploadImage(firstMediaId, accessToken, baseDir);
       thumbMediaId = coverResp.media_id;
     } else {
@@ -585,7 +901,9 @@ async function main(): Promise<void> {
   }
 
   if (args.articleType === "news" && !thumbMediaId) {
-    console.error("Error: No cover image. Provide via --cover, frontmatter.coverImage, or include an image in content.");
+    console.error(
+      "Error: No cover image. Provide via --cover, frontmatter.coverImage, or include an image in content.",
+    );
     process.exit(1);
   }
 
@@ -595,24 +913,35 @@ async function main(): Promise<void> {
   }
 
   console.error("[wechat-api] Publishing to draft...");
-  const result = await publishToDraft({
-    title,
-    author: author || undefined,
-    digest: digest || undefined,
-    content: htmlContent,
-    thumbMediaId,
-    articleType: args.articleType,
-    imageMediaIds: args.articleType === "newspic" ? allMediaIds : undefined,
-  }, accessToken);
+  const result = await publishToDraft(
+    {
+      title,
+      author: author || undefined,
+      digest: digest || undefined,
+      content: htmlContent,
+      thumbMediaId,
+      articleType: args.articleType,
+      imageMediaIds: args.articleType === "newspic" ? allMediaIds : undefined,
+    },
+    accessToken,
+  );
 
-  console.log(JSON.stringify({
-    success: true,
-    media_id: result.media_id,
-    title,
-    articleType: args.articleType,
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        success: true,
+        media_id: result.media_id,
+        title,
+        articleType: args.articleType,
+      },
+      null,
+      2,
+    ),
+  );
 
-  console.error(`[wechat-api] Published successfully! media_id: ${result.media_id}`);
+  console.error(
+    `[wechat-api] Published successfully! media_id: ${result.media_id}`,
+  );
 }
 
 await main().catch((err) => {
