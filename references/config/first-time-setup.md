@@ -1,6 +1,6 @@
 ---
 name: first-time-setup
-description: First-time setup flow for baoyu-post-to-wechat preferences
+description: First-time setup flow for Postwx preferences
 ---
 
 # First-Time Setup
@@ -33,6 +33,11 @@ No EXTEND.md found
 +---------------------+
         |
         v
++---------------------+
+| Check IMAGE_API_KEY |
++---------------------+
+        |
+        v
     Continue to Step 1
 ```
 
@@ -42,41 +47,55 @@ No EXTEND.md found
 
 Use AskUserQuestion with ALL questions in ONE call:
 
-### Question 1: Default Theme
+### Question 1: Creator Role
 
 ```yaml
-header: "Theme"
-question: "Default theme for article conversion?"
+header: "Role"
+question: "What type of content creator are you?"
 options:
-  - label: "default (Recommended)"
-    description: "Classic layout - centered title with border, white-on-color H2 (default: blue)"
-  - label: "grace"
-    description: "Elegant - text shadows, rounded cards, refined blockquotes (default: purple)"
-  - label: "simple"
-    description: "Minimal modern - asymmetric rounded corners, clean whitespace (default: green)"
-  - label: "modern"
-    description: "Large rounded corners, pill headings, spacious (default: orange)"
+  - label: "Tech blogger (Recommended)"
+    description: "科技博主 — 科技产品、编程、AI 等技术内容"
+  - label: "Lifestyle writer"
+    description: "生活作者 — 生活方式、旅行、美食等内容"
+  - label: "Educator"
+    description: "教育者 — 教程、知识科普、学习方法等内容"
+  - label: "Business analyst"
+    description: "商业分析 — 行业分析、商业评论、趋势洞察等内容"
 ```
 
-### Question 2: Default Color
+### Question 2: Writing Style
 
 ```yaml
-header: "Color"
-question: "Default color preset? (theme default if not set)"
+header: "Style"
+question: "What writing style do you prefer?"
 options:
-  - label: "Theme default (Recommended)"
-    description: "Use the theme's built-in default color"
-  - label: "blue"
-    description: "#0F4C81 经典蓝"
-  - label: "red"
-    description: "#A93226 中国红"
-  - label: "green"
-    description: "#009874 翡翠绿"
+  - label: "Professional (Recommended)"
+    description: "专业严谨 — 清晰、准确、有深度"
+  - label: "Casual"
+    description: "轻松随和 — 亲切、易读、口语化"
+  - label: "Humorous"
+    description: "幽默风趣 — 有趣、生动、吸引眼球"
+  - label: "Academic"
+    description: "学术规范 — 引用、论证、严格逻辑"
 ```
 
-Note: User can choose "Other" to type any preset name (vermilion, yellow, purple, sky, rose, olive, black, gray, pink, orange) or hex value.
+### Question 3: Target Audience
 
-### Question 3: Default Author
+```yaml
+header: "Audience"
+question: "Who is your target audience?"
+options:
+  - label: "General public (Recommended)"
+    description: "大众读者 — 通俗易懂，面向所有人"
+  - label: "Industry professionals"
+    description: "行业人士 — 专业术语，面向从业者"
+  - label: "Students"
+    description: "学生群体 — 教学导向，循序渐进"
+  - label: "Tech community"
+    description: "技术社区 — 代码示例，面向开发者"
+```
+
+### Question 4: Default Author
 
 ```yaml
 header: "Author"
@@ -88,7 +107,7 @@ options:
 
 Note: User will likely choose "Other" to type their author name.
 
-### Question 4: Open Comments
+### Question 5: Open Comments
 
 ```yaml
 header: "Comments"
@@ -100,7 +119,7 @@ options:
     description: "Disable comments by default"
 ```
 
-### Question 5: Fans-Only Comments
+### Question 6: Fans-Only Comments
 
 ```yaml
 header: "Fans only"
@@ -112,7 +131,7 @@ options:
     description: "Only followers can comment"
 ```
 
-### Question 6: Save Location
+### Question 7: Save Location
 
 ```yaml
 header: "Save"
@@ -128,21 +147,28 @@ options:
 
 | Choice | Path | Scope |
 |--------|------|-------|
-| Project | `.baoyu-skills/baoyu-post-to-wechat/EXTEND.md` | Current project |
-| User | `~/.baoyu-skills/baoyu-post-to-wechat/EXTEND.md` | All projects |
+| Project | `.baoyu-skills/Postwx/EXTEND.md` | Current project |
+| User | `~/.baoyu-skills/Postwx/EXTEND.md` | All projects |
 
 ## After Setup
 
 1. Create directory if needed
 2. Write EXTEND.md
 3. Confirm: "Preferences saved to [path]"
-4. Continue to Step 0 (load the saved preferences)
+4. **Check IMAGE_API_KEY**: Run `grep -q IMAGE_API_KEY` in `.baoyu-skills/.env` or `~/.baoyu-skills/.env`. If not configured, inform user:
+   ```
+   AI image generation requires IMAGE_API_KEY.
+   Add to your .baoyu-skills/.env:
+   IMAGE_API_KEY=sk-xxx
+   ```
+5. Continue to Step 0 (load the saved preferences)
 
 ## EXTEND.md Template
 
 ```md
-default_theme: [default/grace/simple/modern]
-default_color: [preset name, hex, or empty for theme default]
+creator_role: [tech-blogger/lifestyle-writer/educator/business-analyst]
+writing_style: [professional/casual/humorous/academic]
+target_audience: [general/industry/students/tech-community]
 default_author: [author name or empty]
 need_open_comment: [1/0]
 only_fans_can_comment: [1/0]

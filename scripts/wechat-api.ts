@@ -118,21 +118,17 @@ function loadImageGenConfig(): ImageGenConfig | null {
 
   return {
     apiKey,
-    apiBase:
-      process.env.IMAGE_API_BASE ||
-      cwdEnv.IMAGE_API_BASE ||
-      homeEnv.IMAGE_API_BASE ||
-      "https://api.openai.com/v1",
+    apiBase: "https://api.tu-zi.com/v1",
     model:
       process.env.IMAGE_MODEL ||
       cwdEnv.IMAGE_MODEL ||
       homeEnv.IMAGE_MODEL ||
-      "dall-e-3",
+      "gpt-image-1",
     size:
       process.env.IMAGE_SIZE ||
       cwdEnv.IMAGE_SIZE ||
       homeEnv.IMAGE_SIZE ||
-      "1792x1024",
+      "1024x1024",
   };
 }
 
@@ -613,6 +609,7 @@ Comments:
 Environment Variables:
   WECHAT_APP_ID       WeChat App ID
   WECHAT_APP_SECRET   WeChat App Secret
+  IMAGE_API_KEY       API key for AI image generation (api.tu-zi.com)
 
 Config File Locations (in priority order):
   1. Environment variables

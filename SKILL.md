@@ -1,5 +1,5 @@
 ---
-name: baoyu-post-to-wechat
+name: Postwx
 description: Posts content to WeChat Official Account (微信公众号) via API. Supports article posting (文章) with HTML, markdown, or plain text input. Use when user mentions "发布公众号", "post to wechat", "微信公众号", or "文章".
 ---
 
@@ -24,18 +24,18 @@ Use Bash to check EXTEND.md existence (priority order):
 
 ```bash
 # Check project-level first
-test -f .baoyu-skills/baoyu-post-to-wechat/EXTEND.md && echo "project"
+test -f .baoyu-skills/Postwx/EXTEND.md && echo "project"
 
 # Then user-level (cross-platform: $HOME works on macOS/Linux/WSL)
-test -f "$HOME/.baoyu-skills/baoyu-post-to-wechat/EXTEND.md" && echo "user"
+test -f "$HOME/.baoyu-skills/Postwx/EXTEND.md" && echo "user"
 ```
 
 ┌────────────────────────────────────────────────────────┬───────────────────┐
 │                          Path                          │     Location      │
 ├────────────────────────────────────────────────────────┼───────────────────┤
-│ .baoyu-skills/baoyu-post-to-wechat/EXTEND.md           │ Project directory │
+│ .baoyu-skills/Postwx/EXTEND.md           │ Project directory │
 ├────────────────────────────────────────────────────────┼───────────────────┤
-│ $HOME/.baoyu-skills/baoyu-post-to-wechat/EXTEND.md     │ User home         │
+│ $HOME/.baoyu-skills/Postwx/EXTEND.md     │ User home         │
 └────────────────────────────────────────────────────────┴───────────────────┘
 
 ┌───────────┬───────────────────────────────────────────────────────────────────────────┐
@@ -46,14 +46,17 @@ test -f "$HOME/.baoyu-skills/baoyu-post-to-wechat/EXTEND.md" && echo "user"
 │ Not found │ Run first-time setup ([references/config/first-time-setup.md](references/config/first-time-setup.md)) → Save → Continue │
 └───────────┴───────────────────────────────────────────────────────────────────────────┘
 
-**EXTEND.md Supports**: Default theme | Default color | Default author | Default open-comment switch | Default fans-only-comment switch
+**EXTEND.md Supports**: Creator role | Writing style | Target audience | Default author | Comment switches
 
 First-time setup: [references/config/first-time-setup.md](references/config/first-time-setup.md)
 
 **Minimum supported keys** (case-insensitive, accept `1/0` or `true/false`):
 
-| Key | Default | Mapping |
-|-----|---------|---------|
+| Key | Default | Description |
+|-----|---------|-------------|
+| `creator_role` | `tech-blogger` | Content creator type for role adaptation |
+| `writing_style` | `professional` | Writing style for de-AI processing |
+| `target_audience` | `general` | Target audience for tone adjustment |
 | `default_author` | empty | Fallback for `author` when CLI/frontmatter not provided |
 | `need_open_comment` | `1` | `articles[].need_open_comment` in `draft/add` request |
 | `only_fans_can_comment` | `0` | `articles[].only_fans_can_comment` in `draft/add` request |
@@ -61,22 +64,13 @@ First-time setup: [references/config/first-time-setup.md](references/config/firs
 **Recommended EXTEND.md example**:
 
 ```md
-default_theme: default
-default_color: blue
+creator_role: tech-blogger
+writing_style: professional
+target_audience: general
 default_author: 宝玉
 need_open_comment: 1
 only_fans_can_comment: 0
 ```
-
-**Theme options**: default, grace, simple, modern
-
-**Color presets**: blue, green, vermilion, yellow, purple, sky, rose, olive, black, gray, pink, red, orange (or hex value)
-
-**Value priority**:
-1. CLI arguments
-2. Frontmatter
-3. EXTEND.md
-4. Skill defaults
 
 ## Article Posting Workflow (文章)
 
@@ -84,64 +78,43 @@ Copy this checklist and check off items as you complete them:
 
 ```
 Publishing Progress:
-- [ ] Step 0: Load preferences (EXTEND.md)
+- [ ] Step 0: Load preferences + check credentials
 - [ ] Step 1: Determine input type
-- [ ] Step 2: Configure API credentials
-- [ ] Step 3: Resolve theme/color and validate metadata
-- [ ] Step 4: Publish to WeChat
-- [ ] Step 5: Report completion
+- [ ] Step 2: Role-based content adaptation
+- [ ] Step 3: Auto de-AI processing
+- [ ] Step 4: Auto theme & color selection
+- [ ] Step 5: Auto image generation
+- [ ] Step 6: Validate metadata + publish
+- [ ] Step 7: Completion report
 ```
 
-### Step 0: Load Preferences
+### Step 0: Load Preferences + Check Credentials
 
 Check and load EXTEND.md settings (see Preferences section above).
 
 **CRITICAL**: If not found, complete first-time setup BEFORE any other steps or questions.
 
 Resolve and store these defaults for later steps:
-- `default_theme` (default `default`)
-- `default_color` (omit if not set — theme default applies)
+- `creator_role` (default `tech-blogger`)
+- `writing_style` (default `professional`)
+- `target_audience` (default `general`)
 - `default_author`
 - `need_open_comment` (default `1`)
 - `only_fans_can_comment` (default `0`)
 
-### Step 1: Determine Input Type
-
-| Input Type | Detection | Action |
-|------------|-----------|--------|
-| HTML file | Path ends with `.html`, file exists | Skip to Step 3 |
-| Markdown file | Path ends with `.md`, file exists | Continue to Step 2 |
-| Plain text | Not a file path, or file doesn't exist | Save to markdown, continue to Step 2 |
-
-**Plain Text Handling**:
-
-1. Generate slug from content (first 2-4 meaningful words, kebab-case)
-2. Create directory and save file:
-
-```bash
-mkdir -p "$(pwd)/post-to-wechat/$(date +%Y-%m-%d)"
-# Save content to: post-to-wechat/yyyy-MM-dd/[slug].md
-```
-
-3. Continue processing as markdown file
-
-**Slug Examples**:
-- "Understanding AI Models" → `understanding-ai-models`
-- "人工智能的未来" → `ai-future` (translate to English for slug)
-
-### Step 2: Configure API Credentials
-
 **Check Credentials**:
 
 ```bash
-# Check project-level
-test -f .baoyu-skills/.env && grep -q "WECHAT_APP_ID" .baoyu-skills/.env && echo "project"
+# Check WeChat credentials
+test -f .baoyu-skills/.env && grep -q "WECHAT_APP_ID" .baoyu-skills/.env && echo "wechat-project"
+test -f "$HOME/.baoyu-skills/.env" && grep -q "WECHAT_APP_ID" "$HOME/.baoyu-skills/.env" && echo "wechat-user"
 
-# Check user-level
-test -f "$HOME/.baoyu-skills/.env" && grep -q "WECHAT_APP_ID" "$HOME/.baoyu-skills/.env" && echo "user"
+# Check image API key
+test -f .baoyu-skills/.env && grep -q "IMAGE_API_KEY" .baoyu-skills/.env && echo "image-project"
+test -f "$HOME/.baoyu-skills/.env" && grep -q "IMAGE_API_KEY" "$HOME/.baoyu-skills/.env" && echo "image-user"
 ```
 
-**If Missing - Guide Setup**:
+**If WeChat credentials missing** — guide setup:
 
 ```
 WeChat API credentials not found.
@@ -163,38 +136,212 @@ WECHAT_APP_ID=<user_input>
 WECHAT_APP_SECRET=<user_input>
 ```
 
-### Step 3: Resolve Theme/Color and Validate Metadata
+**If IMAGE_API_KEY missing** — warn but continue (images will be skipped):
 
-1. **Resolve theme** (first match wins, do NOT ask user if resolved):
-   - CLI `--theme` argument
-   - EXTEND.md `default_theme` (loaded in Step 0)
-   - Fallback: `default`
+```
+IMAGE_API_KEY not configured. AI image generation will be skipped.
+Add to your .baoyu-skills/.env:
+IMAGE_API_KEY=sk-xxx
+```
 
-2. **Resolve color** (first match wins):
-   - CLI `--color` argument
-   - EXTEND.md `default_color` (loaded in Step 0)
-   - Omit if not set (theme default applies)
+### Step 1: Determine Input Type
 
-3. **Validate metadata** from frontmatter (markdown) or HTML meta tags (HTML input):
+| Input Type | Detection | Action |
+|------------|-----------|--------|
+| HTML file | Path ends with `.html`, file exists | Skip to Step 6 |
+| Markdown file | Path ends with `.md`, file exists | Continue to Step 2 |
+| Plain text | Not a file path, or file doesn't exist | Save to markdown, continue to Step 2 |
+
+**Plain Text Handling**:
+
+1. Generate slug from content (first 2-4 meaningful words, kebab-case)
+2. Create directory and save file:
+
+```bash
+mkdir -p "$(pwd)/post-to-wechat/$(date +%Y-%m-%d)"
+# Save content to: post-to-wechat/yyyy-MM-dd/[slug].md
+```
+
+3. Continue processing as markdown file
+
+**Slug Examples**:
+- "Understanding AI Models" → `understanding-ai-models`
+- "人工智能的未来" → `ai-future` (translate to English for slug)
+
+### Step 2: Role-Based Content Adaptation
+
+Based on EXTEND.md `creator_role`, `writing_style`, and `target_audience`, adapt the article content:
+
+| Role | Adaptation |
+|------|-----------|
+| `tech-blogger` | 技术术语保留，加入实用性观点，结构清晰 |
+| `lifestyle-writer` | 口语化，加入个人感受，场景描写 |
+| `educator` | 层次分明，循序渐进，加入总结要点 |
+| `business-analyst` | 数据支撑，行业视角，趋势分析 |
+
+| Style | Adaptation |
+|-------|-----------|
+| `professional` | 严谨用词，逻辑清晰，适度使用专业术语 |
+| `casual` | 亲切自然，适当口语化，拉近距离 |
+| `humorous` | 加入巧妙比喻，轻松表达，保持信息量 |
+| `academic` | 规范引用，严格论证，学术用语 |
+
+| Audience | Adaptation |
+|----------|-----------|
+| `general` | 通俗易懂，避免术语堆砌 |
+| `industry` | 行业术语，深度分析 |
+| `students` | 教学口吻，知识点标注 |
+| `tech-community` | 代码示例，技术深度 |
+
+**处理方式**: Claude 直接根据角色定义调整文章内容，不询问用户确认。修改后的内容用于后续步骤。
+
+### Step 3: Auto De-AI Processing
+
+**强制执行**: 每次发布自动执行去AI味处理，不询问用户。
+
+1. 扫描 24 种 AI 痕迹模式（见下方 AI Trace Removal 章节）
+2. 使用 `medium` 强度级别处理
+3. 根据 `writing_style` 调整处理策略：
+   - `professional`: 保留专业表述，去除AI套话
+   - `casual`: 更口语化替换
+   - `humorous`: 保留生动表达，去除模板化语言
+   - `academic`: 保留学术用语，去除AI填充词
+4. 5 维度评分
+5. 输出简要修改报告（修改数量 + 评分）
+
+### Step 4: Auto Theme & Color Selection
+
+**自动选择**: Claude 根据文章内容智能匹配主题和配色，不询问用户。
+
+**匹配规则**:
+
+| 文章类型 | 推荐主题 | 推荐配色 |
+|---------|---------|---------|
+| 技术/编程 | `default` | `blue` |
+| 生活/情感 | `grace` | `purple` 或 `rose` |
+| 教程/教学 | `simple` | `green` |
+| 商业/分析 | `modern` | `orange` 或 `black` |
+| 设计/创意 | `grace` | `vermilion` 或 `pink` |
+| 科普/知识 | `default` | `sky` 或 `green` |
+
+Claude 分析文章内容，综合考虑：
+- 文章主题和领域
+- `creator_role` 偏好
+- 内容的情感基调
+- 目标受众特征
+
+选定后在完成报告中说明选择理由。
+
+**Theme options**: default, grace, simple, modern
+
+**Color presets**: blue, green, vermilion, yellow, purple, sky, rose, olive, black, gray, pink, red, orange (or hex value)
+
+### Step 5: Auto Image Generation
+
+**自动执行**: Claude 分析文章内容，自动选择图片风格，生成封面图和插图。
+
+**流程**:
+
+1. **选择风格**: 根据文章内容和 `creator_role` 自动匹配图片风格（见下方 6 种预设）
+2. **封面图**: 根据文章标题和主题，使用选定风格的提示词模板生成封面
+3. **插图**: 分析文章结构，在适当位置插入 AI 生成图片（如有需要）
+4. 在 Markdown 中插入: `![描述](__generate:提示词__)`
+5. 发布时 `wechat-api.ts` 自动调用图片生成 API 并上传
+
+#### 6 种图片风格预设
+
+| 风格 ID | 名称 | 适用场景 | 色彩方案 |
+|---------|------|---------|---------|
+| `vector` | 扁平矢量 | 技术文章、教程、知识科普 | Cream 底(#F5F0E6), Coral(#E07A5F), Mint(#81B29A), Mustard(#F2CC8F), Blue(#577590) |
+| `watercolor` | 水彩手绘 | 生活方式、旅行、情感散文 | Earth 色系, 柔和边缘, 自然暖调 |
+| `minimal` | 极简留白 | 观点文章、深度思考、哲理 | Mono 黑白(#000000, #374151), 白底(#FFFFFF), 60%+ 留白 |
+| `warm` | 温暖手绘 | 个人故事、成长经历、生活感悟 | Cream 底(#FFFAF0), Warm Orange(#ED8936), Golden(#F6AD55), Terracotta(#C05621) |
+| `blueprint` | 技术蓝图 | API 文档、系统设计、技术深度 | Off-White 底(#FAF8F5), Engineering Blue(#2563EB), Navy, Amber |
+| `notion` | 极简线条 | 产品指南、工具教程、SaaS 介绍 | White/Off-White 底, 黑色文字(#1A1A1A), 淡蓝/淡黄/淡粉点缀 |
+
+#### 风格自动匹配规则
+
+| 文章内容信号 | 推荐风格 |
+|-------------|---------|
+| API、代码、系统架构、技术原理 | `blueprint` |
+| 编程教程、操作指南、知识科普 | `vector` |
+| 产品介绍、工具评测、SaaS | `notion` |
+| 个人故事、成长、情感 | `warm` |
+| 旅行、美食、生活方式 | `watercolor` |
+| 观点评论、深度分析、哲理思考 | `minimal` |
+| 商业分析、行业报告 | `vector` 或 `blueprint` |
+
+#### 提示词模板
+
+**通用结构** — 所有提示词必须包含以下要素：
+
+```
+[风格描述]. [主题内容]. [构图要求]. [色彩方案]. Clean composition with generous white space. Simple or no background. Human figures: simplified stylized silhouettes, not photorealistic.
+```
+
+**`vector` 风格模板**:
+
+```
+Flat vector illustration. Clean black outlines on all elements. [主题描述]. Geometric simplified icons, no gradients. Colors: Cream background (#F5F0E6), Coral Red (#E07A5F), Mint Green (#81B29A), Mustard Yellow (#F2CC8F). Centered composition with white space.
+```
+
+**`watercolor` 风格模板**:
+
+```
+Soft watercolor illustration with natural warmth. [主题描述]. Gentle brush strokes, soft edges, organic flow. Earthy warm tones with muted greens and browns. Light paper texture background. Dreamy atmospheric quality.
+```
+
+**`minimal` 风格模板**:
+
+```
+Ultra-minimalist illustration. [主题描述]. Single focal element centered, 60%+ white space. Black and dark gray (#374151) on pure white background. Clean geometric shapes, no decoration. Zen-like simplicity.
+```
+
+**`warm` 风格模板**:
+
+```
+Warm hand-drawn illustration with friendly feel. [主题描述]. Sketchy organic strokes, variable line weights. Colors: Cream background (#FFFAF0), Warm Orange (#ED8936), Golden Yellow (#F6AD55), Terracotta (#C05621). Cozy inviting atmosphere.
+```
+
+**`blueprint` 风格模板**:
+
+```
+Technical blueprint-style diagram. [主题描述]. Precise lines, grid overlay, 90-degree angles. Colors: Off-White background (#FAF8F5), Engineering Blue (#2563EB), Navy Blue, Light Blue accents, Amber highlights. Schematic aesthetic.
+```
+
+**`notion` 风格模板**:
+
+```
+Minimalist hand-drawn line art in Notion style. [主题描述]. Simple black outlines (#1A1A1A) on white background. Pastel blue, yellow, pink accents only. Clean layout, generous spacing, doodle aesthetic.
+```
+
+**IMAGE_API_KEY 未配置时**: 跳过图片生成，输出警告，继续发布流程。
+
+**API 配置**: 固定使用 `https://api.tu-zi.com/v1`，模型 `gpt-image-1`，只需配置 `IMAGE_API_KEY`。
+
+### Step 6: Validate Metadata + Publish
+
+1. **Validate metadata** from frontmatter (markdown) or HTML meta tags:
 
 | Field | If Missing |
 |-------|------------|
 | Title | Prompt: "Enter title, or press Enter to auto-generate from content" |
-| Summary | Prompt: "Enter summary, or press Enter to auto-generate (recommended for SEO)" |
+| Summary | Auto-generate: first paragraph, truncated to 120 characters |
 | Author | Use fallback chain: CLI `--author` → frontmatter `author` → EXTEND.md `default_author` |
 
 **Auto-Generation Logic**:
 - **Title**: First H1/H2 heading, or first sentence
 - **Summary**: First paragraph, truncated to 120 characters
 
-4. **Cover Image Check** (required for API `article_type=news`):
+2. **Cover Image Check** (required for API `article_type=news`):
    1. Use CLI `--cover` if provided.
    2. Else use frontmatter (`coverImage`, `featureImage`, `cover`, `image`).
-   3. Else check article directory default path: `imgs/cover.png`.
-   4. Else fallback to first inline content image.
-   5. If still missing, stop and request a cover image before publishing.
+   3. Else use Step 5 generated cover image.
+   4. Else check article directory default path: `imgs/cover.png`.
+   5. Else fallback to first inline content image.
+   6. If still missing, stop and request a cover image before publishing.
 
-### Step 4: Publish to WeChat
+3. **Publish**:
 
 **CRITICAL**: Publishing scripts handle markdown conversion internally. Do NOT pre-convert markdown to HTML — pass the original markdown file directly.
 
@@ -202,7 +349,7 @@ WECHAT_APP_SECRET=<user_input>
 npx -y bun ${SKILL_DIR}/scripts/wechat-api.ts <file> --theme <theme> [--color <color>] [--title <title>] [--summary <summary>] [--author <author>] [--cover <cover_path>]
 ```
 
-**CRITICAL**: Always include `--theme` parameter. Never omit it, even if using `default`. Only include `--color` if explicitly set by user or EXTEND.md.
+**CRITICAL**: Always include `--theme` parameter. Never omit it, even if using `default`. Only include `--color` if explicitly set.
 
 **`draft/add` payload rules**:
 - Use endpoint: `POST https://api.weixin.qq.com/cgi-bin/draft/add?access_token=ACCESS_TOKEN`
@@ -213,20 +360,30 @@ npx -y bun ${SKILL_DIR}/scripts/wechat-api.ts <file> --theme <theme> [--color <c
   - `only_fans_can_comment` (default `0`)
 - `author` resolution: CLI `--author` → frontmatter `author` → EXTEND.md `default_author`
 
-If script parameters do not expose the two comment fields, still ensure final API request body includes resolved values.
-
-### Step 5: Completion Report
+### Step 7: Completion Report
 
 ```
 WeChat Publishing Complete!
 
 Input: [type] - [path]
-Theme: [theme name] [color if set]
+
+Role Adaptation:
+• Creator: [creator_role]
+• Style: [writing_style]
+• Audience: [target_audience]
+
+De-AI Processing:
+• Changes: [N] modifications
+• Score: [score]/50 ([rating])
+
+Theme: [theme name] + [color]
+• Reason: [why this theme/color was chosen]
 
 Article:
 • Title: [title]
 • Summary: [summary]
-• Images: [N] inline images
+• Cover: [generated/provided/fallback]
+• Images: [N] AI-generated + [N] inline images
 • Comments: [open/closed], [fans-only/all users]
 
 Result:
@@ -245,28 +402,9 @@ Files created:
 
 ### Overview
 
-自动配图支持三种方式为文章添加 AI 生成图片，生成后自动上传到微信素材库。
+发布流程中自动为文章生成封面和插图。Claude 分析文章内容，从 6 种预设风格中自动匹配，使用对应提示词模板生成图片。
 
-### Method 1: Natural Language (推荐)
-
-Claude 读取文章 → 理解上下文 → 创建提示词 → 插入 Markdown → 发布时自动生成
-
-```
-用户: "帮我在文章开头配一张图"
-
-Claude 自动处理:
-1. 读取文章内容，理解主题
-2. 确定最佳插入位置
-3. 创建英文图片提示词
-4. 在 Markdown 中插入: ![描述](__generate:A modern illustration of...__)
-5. 发布时自动调用图片生成 API 并上传
-```
-
-### Method 2: Manual Markdown Syntax
-
-```markdown
-![科技封面](__generate:A futuristic tech illustration with blue neon lights, minimalist style, 16:9__)
-```
+详见 Step 5 中的**6 种图片风格预设**、**风格自动匹配规则**和**提示词模板**。
 
 ### Syntax
 
@@ -275,18 +413,15 @@ Claude 自动处理:
 ```
 
 - `__generate:` — 固定前缀，标识 AI 生成图片
-- 提示词必须用英文，描述越具体越好
-- 建议包含：风格(minimalist/flat/watercolor)、构图(wide/close-up)、色调(warm/blue)
+- 提示词必须用英文，使用 Step 5 中的风格模板构建
+- 必须包含：风格描述、主题内容、构图要求、色彩方案
 
 ### Image API Configuration
 
-使用兼容 OpenAI 格式的图片生成 API。环境变量：
+固定使用 `https://api.tu-zi.com/v1`，模型 `gpt-image-1`。
 
 ```
-IMAGE_API_KEY=sk-xxx                       # 必填：API 密钥
-IMAGE_API_BASE=https://api.openai.com/v1   # 可选：API 地址
-IMAGE_MODEL=dall-e-3                       # 可选：模型名称
-IMAGE_SIZE=1792x1024                       # 可选：默认尺寸
+IMAGE_API_KEY=sk-xxx    # 必填：API 密钥（配置在 .baoyu-skills/.env）
 ```
 
 配置位置与微信凭证相同（环境变量 > `.baoyu-skills/.env` > `~/.baoyu-skills/.env`）
@@ -294,11 +429,13 @@ IMAGE_SIZE=1792x1024                       # 可选：默认尺寸
 ### Processing Pipeline
 
 ```
+Claude 分析文章 → 创建提示词 → 插入 Markdown
+  ↓
 Markdown: ![alt](__generate:prompt__)
   ↓ 渲染
 HTML: <img src="__generate:prompt__" alt="alt">
   ↓ wechat-api.ts 检测 __generate: 前缀
-调用图片生成 API → 获取图片
+调用 api.tu-zi.com (gpt-image-1) → 获取图片
   ↓
 上传微信素材库 → 获取 CDN URL → 替换 src
 ```
@@ -311,15 +448,7 @@ HTML: <img src="__generate:prompt__" alt="alt">
 
 ### Overview
 
-Humanizer 检测并去除文章中的 AI 写作痕迹，可独立使用或与发布流程组合。
-
-### Trigger
-
-| 用户输入 | 动作 |
-|---------|------|
-| "去AI味" / "去除AI痕迹" / "humanize" | 对文章执行去痕处理 |
-| "润色" / "让文章更自然" | 去痕 + 风格优化 |
-| 发布前附加 "去AI味" | 先去痕再发布 |
+每次发布自动执行。Humanizer 检测并去除文章中的 AI 写作痕迹，强制集成在发布流程 Step 3 中。
 
 ### Intensity Levels
 
@@ -392,37 +521,6 @@ Humanizer 检测并去除文章中的 AI 写作痕迹，可独立使用或与发
 
 **评级**: 45-50 优秀 | 35-44 良好 | <35 需修订
 
-### Workflow
-
-```
-输入文章
-  ↓
-扫描 24 种 AI 痕迹模式
-  ↓
-根据强度级别修改文本
-  ↓
-5 维度评分
-  ↓
-输出: 修改后文章 + 修改报告 + 评分
-```
-
-**修改报告格式**:
-```
-1. [填充短语] "为了实现这一目标" → 删除
-2. [AI高频词] "深入探讨" → "聊聊"
-3. [过度强调] "划时代里程碑" → "重要进展"
-
-评分: 直接性8 + 节奏9 + 信任8 + 真实9 + 精炼8 = 42/50 (良好)
-```
-
-### Combined Usage
-
-去AI味可在发布前自动执行：
-1. 用户请求发布并提到"去AI味"
-2. Claude 先对文章内容执行 Humanizer
-3. 输出修改报告和评分
-4. 用修改后的内容继续发布流程
-
 ---
 
 ## Detailed References
@@ -439,17 +537,20 @@ Humanizer 检测并去除文章中的 AI 写作痕迹，可独立使用或与发
 | HTML input | ✓ |
 | Markdown input | ✓ |
 | Inline images | ✓ |
-| Themes | ✓ |
+| Themes (auto-selected) | ✓ |
 | Auto-generate metadata | ✓ |
 | Default cover fallback (`imgs/cover.png`) | ✓ |
 | Comment control (`need_open_comment`, `only_fans_can_comment`) | ✓ |
-| AI image generation (自动配图) | ✓ |
-| AI trace removal (去AI味) | ✓ |
+| Role-based content adaptation (角色适配) | ✓ |
+| AI trace removal - auto (去AI味) | ✓ |
+| AI image generation - auto (自动配图) | ✓ |
+| Smart theme & color selection (智能排版) | ✓ |
 
 ## Prerequisites
 
 - WeChat Official Account API credentials
-- Guided setup in Step 2, or manually set in `.baoyu-skills/.env`
+- `IMAGE_API_KEY` for AI image generation (optional but recommended)
+- Guided setup in Step 0, or manually set in `.baoyu-skills/.env`
 
 **Config File Locations** (priority order):
 1. Environment variables
@@ -460,11 +561,12 @@ Humanizer 检测并去除文章中的 AI 写作痕迹，可独立使用或与发
 
 | Issue | Solution |
 |-------|----------|
-| Missing API credentials | Follow guided setup in Step 2 |
+| Missing API credentials | Follow guided setup in Step 0 |
 | Access token error | Check if API credentials are valid and not expired |
 | Title/summary missing | Use auto-generation or provide manually |
-| No cover image | Add frontmatter cover or place `imgs/cover.png` in article directory |
+| No cover image | Auto-generated in Step 5, or add frontmatter cover or place `imgs/cover.png` in article directory |
 | Wrong comment defaults | Check `EXTEND.md` keys `need_open_comment` and `only_fans_can_comment` |
+| Image generation skipped | Check `IMAGE_API_KEY` in `.baoyu-skills/.env` |
 
 ## Extension Support
 
