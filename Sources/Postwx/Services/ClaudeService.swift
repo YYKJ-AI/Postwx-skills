@@ -1,5 +1,29 @@
 import Foundation
 
+/// 线程安全的文本累积器
+private final class StreamAccumulator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _text = ""
+
+    func append(_ chunk: String) {
+        lock.lock()
+        _text += chunk
+        lock.unlock()
+    }
+
+    func reset() {
+        lock.lock()
+        _text = ""
+        lock.unlock()
+    }
+
+    var text: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return _text
+    }
+}
+
 /// 通过本地 claude CLI 调用 AI，复用系统级 Claude Code 认证
 struct AIService {
 
@@ -43,24 +67,37 @@ struct AIService {
 
     // MARK: - 调用 claude CLI
 
-    private static func callClaude(system: String, userMessage: String, model: String? = nil) async throws -> String {
+    /// 调用 claude CLI，支持可选的流式输出回调
+    /// - Parameters:
+    ///   - onStream: 当非 nil 时，使用 text 模式并实时回调每个文本片段
+    private static func callClaude(
+        system: String,
+        userMessage: String,
+        model: String? = nil,
+        onStream: (@Sendable (String) -> Void)? = nil
+    ) async throws -> String {
         guard let cliPath = findCLI() else {
             throw AIError.cliNotFound
         }
+
+        let streaming = onStream != nil
 
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
                     let process = Process()
                     process.executableURL = URL(fileURLWithPath: cliPath)
-                    process.arguments = [
-                        "-p",
-                        "--output-format", "json",
-                        "--model", model ?? defaultModel,
-                        "--system-prompt", system,
-                        "--no-session-persistence",
-                        userMessage,
-                    ]
+
+                    var args = ["-p", "--model", model ?? defaultModel,
+                                "--system-prompt", system, "--no-session-persistence"]
+                    if streaming {
+                        // 真正的逐 token 流式：stream-json + partial messages
+                        args += ["--output-format", "stream-json", "--verbose", "--include-partial-messages"]
+                    } else {
+                        args += ["--output-format", "json"]
+                    }
+                    args += ["--", userMessage]
+                    process.arguments = args
 
                     var env = ProcessInfo.processInfo.environment
                     env["CLAUDECODE"] = nil
@@ -71,34 +108,122 @@ struct AIService {
                     process.standardOutput = stdout
                     process.standardError = stderr
 
-                    try process.run()
-                    process.waitUntilExit()
+                    if streaming {
+                        // 流式模式：解析 JSONL，提取 content_block_delta 中的文本
+                        let accumulator = StreamAccumulator()
+                        let lineBuffer = StreamAccumulator() // 用于拼接不完整的行
 
-                    let outData = stdout.fileHandleForReading.readDataToEndOfFile()
+                        stdout.fileHandleForReading.readabilityHandler = { handle in
+                            let data = handle.availableData
+                            guard !data.isEmpty,
+                                  let raw = String(data: data, encoding: .utf8) else { return }
 
-                    if process.terminationStatus != 0 {
-                        let errText = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                        let outText = String(data: outData, encoding: .utf8) ?? ""
-                        continuation.resume(throwing: AIError.requestFailed(
-                            errText.isEmpty ? outText.prefix(300).description : errText.prefix(300).description
-                        ))
-                        return
-                    }
+                            // 拼接到行缓冲区，按换行分割处理
+                            lineBuffer.append(raw)
+                            let buffered = lineBuffer.text
+                            let lines = buffered.components(separatedBy: "\n")
 
-                    // 解析 JSON 输出: { "result": "..." }
-                    guard let json = try? JSONSerialization.jsonObject(with: outData) as? [String: Any],
-                          let result = json["result"] as? String
-                    else {
-                        let text = String(data: outData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                        if text.isEmpty {
+                            // 最后一个元素可能是不完整的行，保留到下次
+                            let complete = lines.dropLast()
+                            let remainder = lines.last ?? ""
+                            lineBuffer.reset()
+                            if !remainder.isEmpty { lineBuffer.append(remainder) }
+
+                            for line in complete {
+                                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !trimmed.isEmpty,
+                                      let jsonData = trimmed.data(using: .utf8),
+                                      let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
+                                else { continue }
+
+                                // 提取 content_block_delta 的文本增量
+                                if let event = obj["event"] as? [String: Any],
+                                   let eventType = event["type"] as? String,
+                                   eventType == "content_block_delta",
+                                   let delta = event["delta"] as? [String: Any],
+                                   let text = delta["text"] as? String {
+                                    accumulator.append(text)
+                                    onStream?(text)
+                                }
+
+                                // 从 result 事件提取最终完整结果
+                                if let type = obj["type"] as? String, type == "result",
+                                   let result = obj["result"] as? String {
+                                    accumulator.reset()
+                                    accumulator.append(result)
+                                }
+                            }
+                        }
+
+                        try process.run()
+                        process.waitUntilExit()
+
+                        stdout.fileHandleForReading.readabilityHandler = nil
+
+                        // 处理缓冲区剩余数据
+                        let remaining = stdout.fileHandleForReading.readDataToEndOfFile()
+                        if let text = String(data: remaining, encoding: .utf8), !text.isEmpty {
+                            // 解析剩余行中的 result
+                            for line in text.components(separatedBy: "\n") {
+                                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !trimmed.isEmpty,
+                                      let jsonData = trimmed.data(using: .utf8),
+                                      let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
+                                else { continue }
+                                if let type = obj["type"] as? String, type == "result",
+                                   let result = obj["result"] as? String {
+                                    accumulator.reset()
+                                    accumulator.append(result)
+                                }
+                            }
+                        }
+
+                        if process.terminationStatus != 0 {
+                            let errData = stderr.fileHandleForReading.readDataToEndOfFile()
+                            let errText = String(data: errData, encoding: .utf8) ?? ""
+                            continuation.resume(throwing: AIError.requestFailed(
+                                errText.isEmpty ? accumulator.text.prefix(300).description : errText.prefix(300).description
+                            ))
+                            return
+                        }
+
+                        let result = accumulator.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if result.isEmpty {
                             continuation.resume(throwing: AIError.requestFailed("Claude CLI 返回空结果"))
                         } else {
-                            continuation.resume(returning: text)
+                            continuation.resume(returning: result)
                         }
-                        return
-                    }
+                    } else {
+                        // 非流式模式：等待完成后解析 JSON
+                        try process.run()
+                        process.waitUntilExit()
 
-                    continuation.resume(returning: result.trimmingCharacters(in: .whitespacesAndNewlines))
+                        let outData = stdout.fileHandleForReading.readDataToEndOfFile()
+
+                        if process.terminationStatus != 0 {
+                            let errText = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                            let outText = String(data: outData, encoding: .utf8) ?? ""
+                            continuation.resume(throwing: AIError.requestFailed(
+                                errText.isEmpty ? outText.prefix(300).description : errText.prefix(300).description
+                            ))
+                            return
+                        }
+
+                        // 解析 JSON 输出: { "result": "..." }
+                        guard let json = try? JSONSerialization.jsonObject(with: outData) as? [String: Any],
+                              let result = json["result"] as? String
+                        else {
+                            let text = String(data: outData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                            if text.isEmpty {
+                                continuation.resume(throwing: AIError.requestFailed("Claude CLI 返回空结果"))
+                            } else {
+                                continuation.resume(returning: text)
+                            }
+                            return
+                        }
+
+                        continuation.resume(returning: result.trimmingCharacters(in: .whitespacesAndNewlines))
+                    }
                 } catch {
                     continuation.resume(throwing: AIError.requestFailed("启动 Claude CLI 失败：\(error.localizedDescription)"))
                 }
@@ -122,7 +247,8 @@ struct AIService {
         content: String,
         role: CreatorRole,
         style: WritingStyle,
-        audience: TargetAudience
+        audience: TargetAudience,
+        onStream: (@Sendable (String) -> Void)? = nil
     ) async throws -> String {
         let system = """
         你是一位资深内容编辑，负责根据创作者角色、写作风格和目标受众对文章进行适配调整。
@@ -143,15 +269,20 @@ struct AIService {
         4. 根据受众调整术语使用和解释深度
         5. 保留所有 Markdown 格式标记（标题、列表、代码块、链接等）
         6. 保留所有图片标记（包括 __generate: 占位符）
-        7. 只输出适配后的全文，不要任何解释或前言
+        7. 去除 YAML frontmatter（即文章开头 --- ... --- 包裹的元数据块，如 tags、created、date 等），输出中不要包含 frontmatter
+        8. 只输出适配后的全文，不要任何解释或前言
         """
 
-        return try await callClaude(system: system, userMessage: content)
+        return try await callClaude(system: system, userMessage: content, onStream: onStream)
     }
 
     // MARK: - Step 3: 去 AI 味（增强版，24 种模式检测 + 五维评分）
 
-    static func deAI(content: String, writingStyle: WritingStyle) async throws -> DeAIResult {
+    static func deAI(
+        content: String,
+        writingStyle: WritingStyle,
+        onStream: (@Sendable (String) -> Void)? = nil
+    ) async throws -> DeAIResult {
         let system = """
         你是一位资深中文编辑。任务：将文章润色为自然、地道的人类写作风格，检测并修正 AI 写作痕迹。
 
@@ -209,10 +340,11 @@ struct AIService {
         ## 规则
         1. 保留所有 Markdown 格式标记
         2. 保留所有图片标记（包括 __generate: 占位符）
-        3. 先输出完整润色后全文，最后一行输出 <!--SCORE:...--> 评分
+        3. 去除 YAML frontmatter（即文章开头 --- ... --- 包裹的元数据块），输出中不要包含 frontmatter
+        4. 先输出完整润色后全文，最后一行输出 <!--SCORE:...--> 评分
         """
 
-        let raw = try await callClaude(system: system, userMessage: content)
+        let raw = try await callClaude(system: system, userMessage: content, onStream: onStream)
 
         // 解析评分
         var processedContent = raw
@@ -443,8 +575,30 @@ enum AIError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .cliNotFound: "未找到 claude CLI，请先安装 Claude Code（npm install -g @anthropic-ai/claude-code）"
-        case .requestFailed(let msg): "AI 调用失败：\(msg)"
+        case .cliNotFound: "未找到 Claude CLI"
+        case .requestFailed(let msg): Self.friendlyMessage(msg)
         }
+    }
+
+    /// 将技术性错误信息转为用户友好的描述
+    private static func friendlyMessage(_ raw: String) -> String {
+        if raw.contains("unknown option") {
+            return "CLI 参数不兼容，请更新 Claude Code"
+        }
+        if raw.contains("timeout") || raw.contains("timed out") {
+            return "AI 响应超时，请稍后重试"
+        }
+        if raw.contains("rate limit") || raw.contains("429") {
+            return "请求过于频繁，请稍后重试"
+        }
+        if raw.contains("auth") || raw.contains("401") || raw.contains("permission") {
+            return "认证失败，请检查 Claude Code 登录状态"
+        }
+        if raw.contains("空结果") {
+            return "AI 未返回内容，请重试"
+        }
+        // 截短过长的原始错误
+        let trimmed = raw.prefix(80)
+        return "AI 处理出错：\(trimmed)"
     }
 }

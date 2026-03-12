@@ -1,7 +1,7 @@
 import SwiftUI
 
 @Observable
-final class AppState {
+final class AppState: @unchecked Sendable {
     // MARK: - Content
 
     var content: String = ""
@@ -28,6 +28,11 @@ final class AppState {
     var deAIScore: Int?
     /// 去 AI 味评级
     var deAIRating: String?
+
+    /// AI 实时输出（流式显示）
+    var aiStreamingText: String = ""
+    /// 当前 AI 步骤名称
+    var aiCurrentStep: String = ""
 
     var isProcessing: Bool { workflowState == .processing }
     var isReviewing: Bool { workflowState == .reviewing }
@@ -66,6 +71,8 @@ final class AppState {
         processedContent = ""
         deAIScore = nil
         deAIRating = nil
+        aiStreamingText = ""
+        aiCurrentStep = ""
     }
 
     func stepStatus(_ step: WorkflowStep) -> StepStatus {

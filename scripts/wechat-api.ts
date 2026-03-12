@@ -264,6 +264,30 @@ async function fetchAccessToken(
   return data.access_token;
 }
 
+/** 根据 magic bytes 检测图片格式 */
+function detectImageFormat(
+  buf: Buffer,
+): { mime: string; ext: string } | null {
+  if (buf.length < 4) return null;
+  // PNG: 89 50 4E 47
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47)
+    return { mime: "image/png", ext: "png" };
+  // JPEG: FF D8 FF
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff)
+    return { mime: "image/jpeg", ext: "jpg" };
+  // GIF: 47 49 46
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46)
+    return { mime: "image/gif", ext: "gif" };
+  // WebP: RIFF....WEBP
+  if (
+    buf.length >= 12 &&
+    buf.slice(0, 4).toString("ascii") === "RIFF" &&
+    buf.slice(8, 12).toString("ascii") === "WEBP"
+  )
+    return { mime: "image/webp", ext: "webp" };
+  return null;
+}
+
 async function uploadImage(
   imagePath: string,
   accessToken: string,
@@ -283,9 +307,44 @@ async function uploadImage(
       throw new Error(`Remote image is empty: ${imagePath}`);
     }
     fileBuffer = Buffer.from(buffer);
-    const urlPath = imagePath.split("?")[0];
-    filename = path.basename(urlPath) || "image.jpg";
     contentType = response.headers.get("content-type") || "image/jpeg";
+
+    // 从 URL 参数推断格式（微信 mmbiz URL 带 wx_fmt 参数）
+    const urlObj = new URL(imagePath);
+    const wxFmt = urlObj.searchParams.get("wx_fmt");
+
+    // 根据 magic bytes 检测实际格式
+    const detected = detectImageFormat(fileBuffer);
+    if (detected) {
+      contentType = detected.mime;
+      filename = `image.${detected.ext}`;
+    } else if (wxFmt) {
+      const fmtMap: Record<string, { mime: string; ext: string }> = {
+        png: { mime: "image/png", ext: "png" },
+        jpeg: { mime: "image/jpeg", ext: "jpg" },
+        jpg: { mime: "image/jpeg", ext: "jpg" },
+        gif: { mime: "image/gif", ext: "gif" },
+      };
+      const fmt = fmtMap[wxFmt];
+      if (fmt) {
+        contentType = fmt.mime;
+        filename = `image.${fmt.ext}`;
+      } else {
+        filename = `image.${wxFmt}`;
+      }
+    } else {
+      const urlPath = imagePath.split("?")[0];
+      filename = path.basename(urlPath) || "image.jpg";
+      // 确保文件名有扩展名
+      if (!path.extname(filename)) {
+        const extFromMime: Record<string, string> = {
+          "image/png": ".png",
+          "image/jpeg": ".jpg",
+          "image/gif": ".gif",
+        };
+        filename += extFromMime[contentType] || ".jpg";
+      }
+    }
   } else {
     const resolvedPath = path.isAbsolute(imagePath)
       ? imagePath

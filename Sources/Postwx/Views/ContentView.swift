@@ -190,6 +190,11 @@ struct ContentView: View {
                     workflowSteps
                         .padding(.vertical, 4)
 
+                    // AI 实时输出
+                    if state.isProcessing && !state.aiStreamingText.isEmpty {
+                        aiStreamingOutput
+                    }
+
                     // 主题配色（仅在审核模式可编辑）
                     if state.isReviewing || state.workflowState == .idle {
                         Divider()
@@ -235,11 +240,11 @@ struct ContentView: View {
     // MARK: - Workflow Steps
 
     private var workflowSteps: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 2) {
             Text("工作流")
-                .font(.caption)
+                .font(.subheadline.weight(.medium))
                 .foregroundStyle(.secondary)
-                .padding(.bottom, 8)
+                .padding(.bottom, 6)
 
             ForEach(WorkflowStep.allCases) { step in
                 WorkflowStepRow(step: step, status: state.stepStatus(step))
@@ -252,7 +257,7 @@ struct ContentView: View {
     private var themeSection: some View {
         Group {
             Text("主题配色")
-                .font(.caption)
+                .font(.subheadline.weight(.medium))
                 .foregroundStyle(.secondary)
 
             Picker("主题", selection: $state.selectedTheme) {
@@ -261,7 +266,7 @@ struct ContentView: View {
                 }
             }
             .pickerStyle(.menu)
-            .controlSize(.small)
+            .controlSize(.regular)
 
             Picker("配色", selection: $state.selectedColor) {
                 ForEach(ThemeColor.allCases) { c in
@@ -269,19 +274,60 @@ struct ContentView: View {
                 }
             }
             .pickerStyle(.menu)
-            .controlSize(.small)
+            .controlSize(.regular)
+        }
+    }
+
+    // MARK: - AI Streaming Output
+
+    private var aiStreamingOutput: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Divider()
+
+            HStack(spacing: 6) {
+                Image(systemName: "sparkle")
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+                Text(state.aiCurrentStep.isEmpty ? "AI 输出" : state.aiCurrentStep)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                ProgressView()
+                    .controlSize(.mini)
+            }
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    Text(state.aiStreamingText.suffix(1500))
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                        .id("bottom")
+                }
+                .frame(maxHeight: 160)
+                .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.blue.opacity(0.15), lineWidth: 1)
+                )
+                .onChange(of: state.aiStreamingText) {
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
+            }
         }
     }
 
     // MARK: - AI Status
 
     private var aiStatusIndicator: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             Circle()
                 .fill(AIService.isAvailable() ? .green : .orange)
-                .frame(width: 6, height: 6)
+                .frame(width: 7, height: 7)
             Text(AIService.isAvailable() ? "Claude AI 已就绪" : "Claude CLI 未安装")
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(.secondary)
         }
     }
@@ -292,9 +338,9 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 6) {
             Label("发布成功", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
-                .font(.caption.weight(.medium))
+                .font(.subheadline.weight(.medium))
             Text("media_id: \(mediaId)")
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(.tertiary)
                 .textSelection(.enabled)
                 .lineLimit(2)
@@ -467,12 +513,17 @@ struct ContentView: View {
                 if AIService.isAvailable() {
                     // ── Step 2: 角色适配 ──
                     state.updateStep(.roleAdaptation, status: .running)
+                    state.aiCurrentStep = "角色适配"
+                    state.aiStreamingText = ""
                     do {
                         content = try await AIService.adaptRole(
                             content: content,
                             role: state.creatorRole,
                             style: state.writingStyle,
-                            audience: state.targetAudience
+                            audience: state.targetAudience,
+                            onStream: { [state] chunk in
+                                Task { @MainActor in state.aiStreamingText += chunk }
+                            }
                         )
                         state.content = content
                         state.updateStep(.roleAdaptation, status: .completed(
@@ -485,10 +536,15 @@ struct ContentView: View {
 
                     // ── Step 3: 去 AI 味 ──
                     state.updateStep(.deAI, status: .running)
+                    state.aiCurrentStep = "去 AI 味"
+                    state.aiStreamingText = ""
                     do {
                         let deAIResult = try await AIService.deAI(
                             content: content,
-                            writingStyle: state.writingStyle
+                            writingStyle: state.writingStyle,
+                            onStream: { [state] chunk in
+                                Task { @MainActor in state.aiStreamingText += chunk }
+                            }
                         )
                         content = deAIResult.content
                         state.content = content
@@ -567,6 +623,8 @@ struct ContentView: View {
                 }
 
                 // 进入审核模式
+                state.aiStreamingText = ""
+                state.aiCurrentStep = ""
                 state.processedContent = content
                 state.updateStep(.publishing, status: .pending)
                 state.workflowState = .reviewing
@@ -701,14 +759,14 @@ struct WorkflowStepRow: View {
     let status: StepStatus
 
     var body: some View {
-        HStack(spacing: 8) {
-            // 状态图标
+        HStack(spacing: 10) {
+            // 步骤序号 / 状态图标
             statusIcon
-                .frame(width: 16, height: 16)
+                .frame(width: 22, height: 22)
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(step.label)
-                    .font(.caption)
+                    .font(.subheadline.weight(status == .running ? .semibold : .regular))
                     .foregroundStyle(textColor)
 
                 // 状态详情
@@ -716,20 +774,24 @@ struct WorkflowStepRow: View {
                 case .completed(let detail):
                     if !detail.isEmpty {
                         Text(detail)
-                            .font(.caption2)
-                            .foregroundStyle(.green)
+                            .font(.caption)
+                            .foregroundStyle(.green.opacity(0.8))
                             .lineLimit(1)
                     }
                 case .failed(let msg):
                     Text(msg)
-                        .font(.caption2)
-                        .foregroundStyle(.red)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
                         .lineLimit(2)
                 case .skipped(let reason):
                     Text(reason)
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
+                case .running:
+                    Text("处理中...")
+                        .font(.caption)
+                        .foregroundStyle(.blue.opacity(0.7))
                 default:
                     EmptyView()
                 }
@@ -737,9 +799,9 @@ struct WorkflowStepRow: View {
 
             Spacer()
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 6)
-        .background(backgroundColor, in: RoundedRectangle(cornerRadius: 4))
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .background(backgroundColor, in: RoundedRectangle(cornerRadius: 6))
     }
 
     @ViewBuilder
@@ -747,23 +809,23 @@ struct WorkflowStepRow: View {
         switch status {
         case .pending:
             Image(systemName: "circle")
-                .font(.caption2)
+                .font(.subheadline)
                 .foregroundStyle(.quaternary)
         case .running:
             ProgressView()
-                .controlSize(.mini)
+                .controlSize(.small)
         case .completed:
             Image(systemName: "checkmark.circle.fill")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.green)
         case .skipped:
-            Image(systemName: "minus.circle.fill")
-                .font(.caption)
+            Image(systemName: "minus.circle")
+                .font(.subheadline)
                 .foregroundStyle(.tertiary)
         case .failed:
-            Image(systemName: "xmark.circle.fill")
-                .font(.caption)
-                .foregroundStyle(.red)
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.subheadline)
+                .foregroundStyle(.orange)
         }
     }
 
@@ -772,15 +834,15 @@ struct WorkflowStepRow: View {
         case .pending: .secondary
         case .running: .primary
         case .completed: .primary
-        case .skipped: .gray
-        case .failed: .red
+        case .skipped: .secondary
+        case .failed: .primary
         }
     }
 
     private var backgroundColor: Color {
         switch status {
-        case .running: .blue.opacity(0.05)
-        case .failed: .red.opacity(0.05)
+        case .running: .blue.opacity(0.06)
+        case .failed: .orange.opacity(0.06)
         default: .clear
         }
     }
@@ -804,11 +866,11 @@ struct LabeledField: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
             TextField(prompt, text: $text, axis: axis)
                 .textFieldStyle(.roundedBorder)
-                .controlSize(.small)
+                .controlSize(.regular)
         }
     }
 }
