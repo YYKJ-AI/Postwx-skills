@@ -29,10 +29,10 @@ struct ContentView: View {
     @State private var state = AppState()
     @State private var droppedFileURL: URL?
     @State private var showSettings = false
+    @State private var showGlobalAISettings = false
     @State private var publishError: String?
     @State private var showOriginalContent = false
-    @AppStorage("username") private var storedUsername = ""
-    @AppStorage("defaultAuthor") private var storedDefaultAuthor = ""
+    private var profileManager = ProfileManager.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -50,14 +50,13 @@ struct ContentView: View {
         .background(Design.panelBg.opacity(0.5))
         .onAppear {
             loadCredentials()
-            if state.author.isEmpty {
-                let fallback = storedDefaultAuthor.isEmpty ? storedUsername : storedDefaultAuthor
-                if !fallback.isEmpty { state.author = fallback }
-            }
         }
         .sheet(isPresented: $showSettings) {
             SettingsView(state: state)
                 .interactiveDismissDisabled(false)
+        }
+        .sheet(isPresented: $showGlobalAISettings) {
+            GlobalAISettingsView()
         }
         .alert("发布失败", isPresented: Binding(
             get: { publishError != nil },
@@ -118,6 +117,10 @@ struct ContentView: View {
                 openFile()
             }
             .disabled(state.isBusy)
+
+            ToolbarButton(icon: "photo.artframe", label: "AI 配图") {
+                showGlobalAISettings = true
+            }
 
             ToolbarButton(icon: "gearshape", label: "设置") {
                 showSettings = true
@@ -259,6 +262,9 @@ struct ContentView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if !state.isProcessing {
+                        // 目标账号选择
+                        accountSelector
+
                         metadataFields
                     }
 
@@ -292,6 +298,165 @@ struct ContentView: View {
         .background(Design.panelBg.opacity(0.3))
     }
 
+    // MARK: - Account Selector (Multi-Select)
+
+    private var accountSelector: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "person.crop.rectangle.stack.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Design.accentGradient)
+                Text("发布到")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                if !profileManager.profiles.isEmpty {
+                    let allSelected = state.selectedProfileIds.count == profileManager.profiles.count
+                    Button(allSelected ? "全不选" : "全选") {
+                        if allSelected {
+                            state.selectedProfileIds.removeAll()
+                        } else {
+                            state.selectedProfileIds = Set(profileManager.profiles.map(\.id))
+                        }
+                        applyPrimaryProfile()
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .buttonStyle(.plain)
+                    .disabled(state.isBusy)
+                }
+            }
+
+            if profileManager.profiles.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                    Text("暂无账号，请在设置中添加")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: Design.smallRadius)
+                        .fill(Design.cardBg)
+                )
+            } else {
+                VStack(spacing: 4) {
+                    ForEach(profileManager.profiles) { profile in
+                        let isSelected = state.selectedProfileIds.contains(profile.id)
+                        let publishStatus = state.profilePublishStatuses[profile.id]
+                        Button {
+                            toggleProfile(profile)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(isSelected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(profile.name)
+                                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(1)
+                                    HStack(spacing: 4) {
+                                        if let role = CreatorRole(rawValue: profile.creatorRole) {
+                                            Text(role.displayName)
+                                                .font(.system(size: 10))
+                                                .foregroundStyle(.tertiary)
+                                        }
+                                        if let style = WritingStyle(rawValue: profile.writingStyle) {
+                                            Text("·")
+                                                .font(.system(size: 10))
+                                                .foregroundStyle(.quaternary)
+                                            Text(style.displayName)
+                                                .font(.system(size: 10))
+                                                .foregroundStyle(.tertiary)
+                                        }
+                                    }
+                                }
+
+                                Spacer()
+
+                                // 发布状态指示
+                                if let status = publishStatus {
+                                    publishStatusBadge(status)
+                                } else if profile.wechatAppId.isEmpty {
+                                    Text("未配置")
+                                        .font(.system(size: 9, weight: .medium))
+                                        .foregroundStyle(.orange)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(.orange.opacity(0.1), in: Capsule())
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(
+                                RoundedRectangle(cornerRadius: Design.smallRadius)
+                                    .fill(isSelected ? Color.accentColor.opacity(0.06) : Design.cardBg)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: Design.smallRadius)
+                                    .stroke(isSelected ? Color.accentColor.opacity(0.25) : Design.subtleBorder, lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(state.isBusy)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func publishStatusBadge(_ status: ProfilePublishStatus) -> some View {
+        switch status {
+        case .pending:
+            Image(systemName: "clock")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        case .publishing:
+            ProgressView()
+                .controlSize(.mini)
+        case .success:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(.green)
+        case .failed(let msg):
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(.red)
+                .help(msg)
+        }
+    }
+
+    private func toggleProfile(_ profile: AccountProfile) {
+        if state.selectedProfileIds.contains(profile.id) {
+            state.selectedProfileIds.remove(profile.id)
+        } else {
+            state.selectedProfileIds.insert(profile.id)
+        }
+        applyPrimaryProfile()
+    }
+
+    private var anySelectedHasCredentials: Bool {
+        state.selectedProfileIds.contains { id in
+            guard let p = profileManager.profiles.first(where: { $0.id == id }) else { return false }
+            return !p.wechatAppId.isEmpty && !p.wechatAppSecret.isEmpty
+        }
+    }
+
+    private func applyPrimaryProfile() {
+        if let primaryId = state.primaryProfileId {
+            profileManager.switchProfile(id: primaryId)
+            profileManager.applyToState(state)
+        }
+    }
+
     // MARK: - Metadata Fields
 
     private var metadataFields: some View {
@@ -299,8 +464,8 @@ struct ContentView: View {
             StyledField(label: "标题", icon: "textformat", text: $state.title, prompt: "自动提取")
                 .disabled(state.isBusy)
             StyledField(label: "作者", icon: "person", text: $state.author, prompt: {
-                if !storedDefaultAuthor.isEmpty { return storedDefaultAuthor }
-                if !storedUsername.isEmpty { return storedUsername }
+                if !state.defaultAuthor.isEmpty { return state.defaultAuthor }
+                if !state.username.isEmpty { return state.username }
                 return "可选"
             }())
                 .disabled(state.isBusy)
@@ -418,29 +583,59 @@ struct ContentView: View {
 
     private func doneSection(mediaId: String) -> some View {
         VStack(spacing: 10) {
+            let successCount = state.profilePublishStatuses.values.filter {
+                if case .success = $0 { return true }; return false
+            }.count
+            let failCount = state.profilePublishStatuses.values.filter {
+                if case .failed = $0 { return true }; return false
+            }.count
+            let total = successCount + failCount
+
             ZStack {
                 Circle()
-                    .fill(Design.successGradient.opacity(0.12))
+                    .fill((failCount == 0 ? Design.successGradient : Design.warningGradient).opacity(0.12))
                     .frame(width: 48, height: 48)
-                Image(systemName: "checkmark.circle.fill")
+                Image(systemName: failCount == 0 ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
                     .font(.system(size: 24))
-                    .foregroundStyle(Design.successGradient)
+                    .foregroundStyle(failCount == 0 ? Design.successGradient : Design.warningGradient)
             }
 
-            Text("发布成功！")
+            Text(failCount == 0 ? "全部发布成功！" : "发布完成 (\(successCount)/\(total) 成功)")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.primary.opacity(0.8))
 
-            if !mediaId.isEmpty {
-                Text("media_id: \(mediaId)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .textSelection(.enabled)
-                    .lineLimit(2)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 5))
+            // 每个账号的结果
+            VStack(spacing: 4) {
+                ForEach(profileManager.profiles.filter({ state.profilePublishStatuses[$0.id] != nil })) { profile in
+                    if let status = state.profilePublishStatuses[profile.id] {
+                        HStack(spacing: 6) {
+                            switch status {
+                            case .success:
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.green)
+                            case .failed:
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.red)
+                            default:
+                                EmptyView()
+                            }
+                            Text(profile.name)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            if case .failed(let msg) = status {
+                                Text(msg)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.red.opacity(0.8))
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                }
             }
+            .padding(.horizontal, 8)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
@@ -462,7 +657,9 @@ struct ContentView: View {
         VStack(spacing: 8) {
             if state.isReviewing {
                 GradientButton(
-                    label: "确认发布",
+                    label: state.selectedProfileIds.count > 1
+                        ? "发布到 \(state.selectedProfileIds.count) 个账号"
+                        : "确认发布",
                     icon: "paperplane.fill",
                     gradient: Design.accentGradient
                 ) {
@@ -479,7 +676,7 @@ struct ContentView: View {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("正在发布到草稿箱...")
+                    Text("正在发布到 \(state.selectedProfileIds.count) 个账号...")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                 }
@@ -523,8 +720,8 @@ struct ContentView: View {
                 ) {
                     startWorkflow()
                 }
-                .disabled(state.content.isEmpty || state.isBusy || !state.hasCredentials)
-                .help(state.hasCredentials ? "" : "请先在设置中配置微信凭证")
+                .disabled(state.content.isEmpty || state.isBusy || !state.hasSelectedProfiles || !anySelectedHasCredentials)
+                .help(!state.hasSelectedProfiles ? "请选择至少一个目标账号" : !anySelectedHasCredentials ? "选中的账号未配置微信凭证" : "")
             }
         }
     }
@@ -733,63 +930,112 @@ struct ContentView: View {
         state.workflowState = .publishing
         state.updateStep(.publishing, status: .running)
 
+        // 初始化每个选中账号的发布状态
+        for id in state.selectedProfileIds {
+            state.profilePublishStatuses[id] = .pending
+        }
+
+        let content = state.content
+        let title = state.title
+        let summary = state.summary
+        let format = state.inputFormat
+        let d = UserDefaults.standard
+        let globalImageApiBase = d.string(forKey: "imageApiBase") ?? ""
+        let globalImageApiKey = d.string(forKey: "imageApiKey") ?? ""
+        let globalImageModel = d.string(forKey: "imageModel") ?? ""
+
         Task {
-            do {
-                let content = state.content
-                let title = state.title
-                let summary = state.summary
-                let format = state.inputFormat
+            // 准备文件（所有账号共享同一份内容文件）
+            let filePath: String
+            if format == .html {
+                let dir = "/tmp/postwx/\(formattedDate())"
+                try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+                filePath = "\(dir)/\(PublishService.generateSlug(from: title)).html"
+                try? content.write(toFile: filePath, atomically: true, encoding: .utf8)
+            } else {
+                filePath = PublishService.saveTempMarkdown(
+                    content: content,
+                    title: title
+                )
+            }
 
-                let filePath: String
-                if format == .html {
-                    let dir = "/tmp/postwx/\(formattedDate())"
-                    try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-                    filePath = "\(dir)/\(PublishService.generateSlug(from: title)).html"
-                    try? content.write(toFile: filePath, atomically: true, encoding: .utf8)
-                } else {
-                    filePath = PublishService.saveTempMarkdown(
-                        content: content,
-                        title: title
+            // 逐账号发布
+            var successCount = 0
+            var failCount = 0
+            var lastMediaId = ""
+
+            for profileId in state.selectedProfileIds {
+                guard let profile = profileManager.profiles.first(where: { $0.id == profileId }) else {
+                    state.profilePublishStatuses[profileId] = .failed("账号不存在")
+                    failCount += 1
+                    continue
+                }
+
+                guard !profile.wechatAppId.isEmpty && !profile.wechatAppSecret.isEmpty else {
+                    state.profilePublishStatuses[profileId] = .failed("未配置凭证")
+                    failCount += 1
+                    continue
+                }
+
+                state.profilePublishStatuses[profileId] = .publishing
+                state.publishLog.append("[\(profile.name)] 开始发布...")
+
+                do {
+                    let credentials = PublishService.Credentials(
+                        wechatAppId: profile.wechatAppId,
+                        wechatAppSecret: profile.wechatAppSecret,
+                        imageApiBase: globalImageApiBase,
+                        imageApiKey: globalImageApiKey,
+                        imageModel: globalImageModel
                     )
-                }
 
-                let credentials = PublishService.Credentials(
-                    wechatAppId: state.wechatAppId,
-                    wechatAppSecret: state.wechatAppSecret,
-                    imageApiBase: state.imageApiBase,
-                    imageApiKey: state.imageApiKey,
-                    imageModel: state.imageModel
-                )
+                    let author = profile.defaultAuthor.isEmpty ? profile.username : profile.defaultAuthor
 
-                let result = try await PublishService.publish(
-                    filePath: filePath,
-                    theme: state.selectedTheme,
-                    color: state.selectedColor,
-                    title: title.isEmpty ? nil : title,
-                    summary: summary.isEmpty ? nil : summary,
-                    author: state.author.isEmpty ? nil : state.author,
-                    credentials: credentials,
-                    onLog: { log in
-                        Task { @MainActor in
-                            state.publishLog.append(log)
+                    let result = try await PublishService.publish(
+                        filePath: filePath,
+                        theme: state.selectedTheme,
+                        color: state.selectedColor,
+                        title: title.isEmpty ? nil : title,
+                        summary: summary.isEmpty ? nil : summary,
+                        author: author.isEmpty ? nil : author,
+                        credentials: credentials,
+                        onLog: { log in
+                            Task { @MainActor in
+                                state.publishLog.append("[\(profile.name)] \(log)")
+                            }
                         }
+                    )
+
+                    var mediaId = ""
+                    if let data = result.data(using: .utf8),
+                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let mid = json["media_id"] as? String {
+                        mediaId = mid
                     }
-                )
 
-                var mediaId = ""
-                if let data = result.data(using: .utf8),
-                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let mid = json["media_id"] as? String {
-                    mediaId = mid
+                    state.profilePublishStatuses[profileId] = .success(mediaId)
+                    lastMediaId = mediaId
+                    successCount += 1
+                    state.publishLog.append("[\(profile.name)] 发布成功")
+                } catch {
+                    state.profilePublishStatuses[profileId] = .failed(error.localizedDescription)
+                    failCount += 1
+                    state.publishLog.append("[\(profile.name)] 发布失败: \(error.localizedDescription)")
                 }
+            }
 
-                state.updateStep(.publishing, status: .completed("已发布"))
-                state.workflowState = .done(mediaId)
-
-            } catch {
-                state.updateStep(.publishing, status: .failed(error.localizedDescription))
-                state.workflowState = .failed(error.localizedDescription)
-                publishError = error.localizedDescription
+            // 汇总结果
+            let total = successCount + failCount
+            if failCount == 0 {
+                state.updateStep(.publishing, status: .completed("全部成功 (\(successCount)/\(total))"))
+                state.workflowState = .done(lastMediaId)
+            } else if successCount > 0 {
+                state.updateStep(.publishing, status: .completed("部分成功 (\(successCount)/\(total))"))
+                state.workflowState = .done(lastMediaId)
+            } else {
+                state.updateStep(.publishing, status: .failed("全部失败 (\(failCount)/\(total))"))
+                state.workflowState = .failed("所有账号发布失败")
+                publishError = "所有账号发布均失败，请检查凭证配置"
             }
         }
     }
@@ -819,34 +1065,12 @@ struct ContentView: View {
     // MARK: - Load Credentials
 
     private func loadCredentials() {
-        let defaults = UserDefaults.standard
-        state.username = defaults.string(forKey: "username") ?? ""
-        state.wechatAppId = defaults.string(forKey: "wechatAppId") ?? ""
-        state.wechatAppSecret = defaults.string(forKey: "wechatAppSecret") ?? ""
-        state.imageApiBase = defaults.string(forKey: "imageApiBase") ?? ""
-        state.imageApiKey = defaults.string(forKey: "imageApiKey") ?? ""
-        state.imageModel = defaults.string(forKey: "imageModel") ?? ""
-        state.defaultAuthor = defaults.string(forKey: "defaultAuthor") ?? ""
-
-        if state.author.isEmpty {
-            let fallbackAuthor = state.defaultAuthor.isEmpty ? state.username : state.defaultAuthor
-            if !fallbackAuthor.isEmpty {
-                state.author = fallbackAuthor
-            }
+        if profileManager.profiles.isEmpty {
+            profileManager.addProfile(AccountProfile())
         }
-
-        if let role = defaults.string(forKey: "creatorRole"),
-           let r = CreatorRole(rawValue: role) {
-            state.creatorRole = r
-        }
-        if let style = defaults.string(forKey: "writingStyle"),
-           let s = WritingStyle(rawValue: style) {
-            state.writingStyle = s
-        }
-        if let audience = defaults.string(forKey: "targetAudience"),
-           let a = TargetAudience(rawValue: audience) {
-            state.targetAudience = a
-        }
+        // 默认选中所有账号
+        state.selectedProfileIds = Set(profileManager.profiles.map(\.id))
+        applyPrimaryProfile()
     }
 }
 

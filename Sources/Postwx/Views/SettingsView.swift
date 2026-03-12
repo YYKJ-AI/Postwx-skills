@@ -3,24 +3,14 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     var state: AppState?
+    var pm = ProfileManager.shared
 
-    @AppStorage("username") private var username = ""
-    @AppStorage("wechatAppId") private var appId = ""
-    @AppStorage("wechatAppSecret") private var appSecret = ""
-    @AppStorage("imageApiBase") private var imageApiBase = ""
-    @AppStorage("imageApiKey") private var imageApiKey = ""
-    @AppStorage("imageModel") private var imageModel = ""
-    @AppStorage("creatorRole") private var creatorRole = "tech-blogger"
-    @AppStorage("writingStyle") private var writingStyle = "professional"
-    @AppStorage("targetAudience") private var targetAudience = "general"
-    @AppStorage("defaultAuthor") private var defaultAuthor = ""
-    @AppStorage("needOpenComment") private var needOpenComment = true
-    @AppStorage("onlyFansCanComment") private var onlyFansCanComment = false
-
-    @State private var selectedTab = 0
+    @State private var editingProfile: AccountProfile = AccountProfile()
     @State private var wechatTestState: TestState = .idle
-    @State private var imageTestState: TestState = .idle
-    @State private var claudeTestState: TestState = .idle
+    @State private var showNewProfileSheet = false
+    @State private var newProfileName = ""
+    @State private var profileToDelete: AccountProfile?
+    @State private var editingName = false
 
     private let accentGradient = LinearGradient(
         colors: [Color(hue: 0.72, saturation: 0.65, brightness: 0.95),
@@ -30,26 +20,41 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 顶部标题栏
             header
-
-            // Tab 切换
-            tabPicker
-
             Divider().opacity(0.5)
 
-            // 内容区
-            Group {
-                if selectedTab == 0 {
-                    credentialsTab
-                } else {
-                    preferencesTab
-                }
+            HSplitView {
+                // 左侧：账号列表
+                accountList
+                    .frame(width: 150)
+
+                // 右侧：选中账号的完整配置
+                profileDetail
+                    .frame(minWidth: 340)
             }
         }
-        .frame(width: 440, height: 600)
+        .frame(width: 560, height: 640)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear { loadEditingProfile() }
         .onDisappear { syncToState() }
+        .sheet(isPresented: $showNewProfileSheet) {
+            newProfileSheet
+        }
+        .alert("删除账号", isPresented: Binding(
+            get: { profileToDelete != nil },
+            set: { if !$0 { profileToDelete = nil } }
+        )) {
+            Button("取消", role: .cancel) { profileToDelete = nil }
+            Button("删除", role: .destructive) {
+                if let p = profileToDelete {
+                    pm.deleteProfile(id: p.id)
+                    loadEditingProfile()
+                    syncToState()
+                }
+            }
+        } message: {
+            Text("确定删除「\(profileToDelete?.name ?? "")」？此操作不可恢复。")
+        }
     }
 
     // MARK: - Header
@@ -61,7 +66,7 @@ struct SettingsView: View {
                 Image(systemName: "gearshape.fill")
                     .font(.system(size: 13))
                     .foregroundStyle(accentGradient)
-                Text("设置")
+                Text("账号管理")
                     .font(.system(size: 15, weight: .bold, design: .rounded))
             }
             Spacer()
@@ -83,104 +88,201 @@ struct SettingsView: View {
         .padding(.bottom, 10)
     }
 
-    // MARK: - Tab Picker
+    // MARK: - Account List (Left Sidebar)
 
-    private var tabPicker: some View {
-        HStack(spacing: 4) {
-            TabButton(title: "凭证", icon: "key.fill", isSelected: selectedTab == 0) {
-                withAnimation(.snappy(duration: 0.2)) { selectedTab = 0 }
+    private var accountList: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 4) {
+                    ForEach(pm.profiles) { profile in
+                        let isSelected = profile.id == editingProfile.id
+                        Button {
+                            saveCurrentAndSwitch(to: profile)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Circle()
+                                    .fill(profileColor(for: profile))
+                                    .frame(width: 8, height: 8)
+
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(profile.name)
+                                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(1)
+                                    if let role = CreatorRole(rawValue: profile.creatorRole) {
+                                        Text(role.displayName)
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                }
+
+                                Spacer()
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(8)
             }
-            TabButton(title: "偏好", icon: "slider.horizontal.3", isSelected: selectedTab == 1) {
-                withAnimation(.snappy(duration: 0.2)) { selectedTab = 1 }
+
+            Divider().opacity(0.3)
+
+            // 新建 / 删除
+            HStack(spacing: 4) {
+                Button {
+                    newProfileName = ""
+                    showNewProfileSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("新建账号")
+
+                Button {
+                    if pm.profiles.count > 1 {
+                        profileToDelete = editingProfile
+                    }
+                } label: {
+                    Image(systemName: "minus")
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .disabled(pm.profiles.count <= 1)
+                .help("删除当前账号")
+
+                Spacer()
             }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
         }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 10)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
     }
 
-    // MARK: - Credentials Tab
+    private func profileColor(for profile: AccountProfile) -> Color {
+        profile.wechatAppId.isEmpty ? .orange : .green
+    }
 
-    private var credentialsTab: some View {
+    // MARK: - Profile Detail (Right)
+
+    private var profileDetail: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                // 用户信息
-                SettingsCard(title: "用户信息", icon: "person.circle.fill", color: .blue) {
-                    SettingsTextField("用户名", text: $username)
+                // 账号名称（可编辑）
+                HStack(spacing: 8) {
+                    if editingName {
+                        TextField("账号名称", text: $editingProfile.name)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(Color(nsColor: .textBackgroundColor))
+                            )
+                            .onSubmit { editingName = false }
+                    } else {
+                        Text(editingProfile.name)
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                    }
+
+                    Button {
+                        editingName.toggle()
+                    } label: {
+                        Image(systemName: editingName ? "checkmark.circle.fill" : "pencil.circle")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
                 }
 
-                // 微信公众号
+                // 用户信息
+                SettingsCard(title: "用户信息", icon: "person.circle.fill", color: .blue) {
+                    VStack(spacing: 10) {
+                        SettingsTextField("用户名", text: $editingProfile.username)
+                        SettingsTextField("默认作者", text: $editingProfile.defaultAuthor)
+                    }
+                }
+
+                // 创作人设
+                SettingsCard(title: "创作人设", icon: "person.text.rectangle.fill", color: .orange) {
+                    VStack(spacing: 10) {
+                        SettingsPickerField("角色", selection: $editingProfile.creatorRole) {
+                            ForEach(CreatorRole.allCases) { role in
+                                Text(role.displayName).tag(role.rawValue)
+                            }
+                        }
+                        SettingsPickerField("风格", selection: $editingProfile.writingStyle) {
+                            ForEach(WritingStyle.allCases) { style in
+                                Text(style.displayName).tag(style.rawValue)
+                            }
+                        }
+                        SettingsPickerField("受众", selection: $editingProfile.targetAudience) {
+                            ForEach(TargetAudience.allCases) { audience in
+                                Text(audience.displayName).tag(audience.rawValue)
+                            }
+                        }
+                    }
+
+                    // 人设预览
+                    if let role = CreatorRole(rawValue: editingProfile.creatorRole) {
+                        Text(role.adaptationGuide)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                            .padding(.top, 2)
+                    }
+                }
+
+                // 微信公众号凭证
                 SettingsCard(title: "微信公众号", icon: "message.fill", color: .green) {
                     VStack(spacing: 10) {
-                        SettingsTextField("App ID", text: $appId)
-                        SettingsSecureField("App Secret", text: $appSecret)
+                        SettingsTextField("App ID", text: $editingProfile.wechatAppId)
+                        SettingsSecureField("App Secret", text: $editingProfile.wechatAppSecret)
                     }
 
                     SettingsTestButton(
                         state: wechatTestState,
                         label: "测试连接",
-                        disabled: appId.isEmpty || appSecret.isEmpty
+                        disabled: editingProfile.wechatAppId.isEmpty || editingProfile.wechatAppSecret.isEmpty
                     ) {
                         testWechat()
                     }
                 }
 
-                // AI 配图
-                SettingsCard(title: "AI 配图", icon: "photo.artframe", color: .purple, badge: "可选") {
-                    VStack(spacing: 10) {
-                        SettingsTextField("API Base URL", text: $imageApiBase, placeholder: "https://api.tu-zi.com")
-                        SettingsSecureField("API Key", text: $imageApiKey)
-                        SettingsTextField("模型", text: $imageModel, placeholder: "gpt-image-1")
-                    }
-
-                    Text("兼容 OpenAI Images API 格式的服务均可使用")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-
-                    SettingsTestButton(
-                        state: imageTestState,
-                        label: "测试生图",
-                        disabled: imageApiKey.isEmpty
-                    ) {
-                        testImage()
-                    }
-                }
-
-                // Claude AI
-                SettingsCard(title: "AI 润色", icon: "sparkles", color: .indigo) {
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(AIService.isAvailable() ? .green : .orange)
-                            .frame(width: 7, height: 7)
-                            .shadow(color: AIService.isAvailable() ? .green.opacity(0.4) : .orange.opacity(0.4), radius: 3)
-                        Text(AIService.isAvailable()
-                             ? "Claude Code 已就绪"
-                             : "未检测到 claude CLI")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if AIService.isAvailable() {
-                        Text("自动使用系统级认证，无需额外配置")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-
-                        SettingsTestButton(
-                            state: claudeTestState,
-                            label: "测试 AI",
-                            disabled: false
-                        ) {
-                            testClaude()
+                // 发布设置
+                SettingsCard(title: "发布设置", icon: "paperplane.fill", color: .teal) {
+                    VStack(spacing: 8) {
+                        Toggle(isOn: $editingProfile.needOpenComment) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "bubble.left.and.bubble.right")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                Text("开启评论")
+                                    .font(.system(size: 13))
+                            }
                         }
-                    } else {
-                        HStack(spacing: 4) {
-                            Image(systemName: "terminal")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.tertiary)
-                            Text("npm install -g @anthropic-ai/claude-code")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.tertiary)
-                                .textSelection(.enabled)
+                        .toggleStyle(.switch)
+
+                        Toggle(isOn: $editingProfile.onlyFansCanComment) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "heart.circle")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                Text("仅粉丝可评论")
+                                    .font(.system(size: 13))
+                            }
                         }
+                        .toggleStyle(.switch)
                     }
                 }
 
@@ -193,7 +295,7 @@ struct SettingsView: View {
                         HStack(spacing: 5) {
                             Image(systemName: "square.and.arrow.down")
                                 .font(.system(size: 11))
-                            Text("从 .env 文件导入")
+                            Text("从 .env 文件导入凭证")
                                 .font(.system(size: 12, weight: .medium))
                         }
                         .foregroundStyle(.secondary)
@@ -209,63 +311,60 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Preferences Tab
+    // MARK: - New Profile Sheet
 
-    private var preferencesTab: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                SettingsCard(title: "创作角色", icon: "person.text.rectangle.fill", color: .orange) {
-                    VStack(spacing: 10) {
-                        SettingsPickerField("角色", selection: $creatorRole) {
-                            ForEach(CreatorRole.allCases) { role in
-                                Text(role.displayName).tag(role.rawValue)
-                            }
-                        }
-                        SettingsPickerField("风格", selection: $writingStyle) {
-                            ForEach(WritingStyle.allCases) { style in
-                                Text(style.displayName).tag(style.rawValue)
-                            }
-                        }
-                        SettingsPickerField("受众", selection: $targetAudience) {
-                            ForEach(TargetAudience.allCases) { audience in
-                                Text(audience.displayName).tag(audience.rawValue)
-                            }
-                        }
-                    }
+    private var newProfileSheet: some View {
+        VStack(spacing: 16) {
+            Text("新建账号")
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+
+            SettingsTextField("账号名称", text: $newProfileName, placeholder: "如：技术号、生活号")
+
+            HStack(spacing: 12) {
+                Button("取消") {
+                    showNewProfileSheet = false
                 }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .background(.ultraThinMaterial, in: Capsule())
 
-                SettingsCard(title: "发布设置", icon: "paperplane.fill", color: .teal) {
-                    VStack(spacing: 10) {
-                        SettingsTextField("默认作者", text: $defaultAuthor)
-
-                        VStack(spacing: 8) {
-                            Toggle(isOn: $needOpenComment) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "bubble.left.and.bubble.right")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.secondary)
-                                    Text("开启评论")
-                                        .font(.system(size: 13))
-                                }
-                            }
-                            .toggleStyle(.switch)
-
-                            Toggle(isOn: $onlyFansCanComment) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "heart.circle")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.secondary)
-                                    Text("仅粉丝可评论")
-                                        .font(.system(size: 13))
-                                }
-                            }
-                            .toggleStyle(.switch)
-                        }
-                    }
+                Button("创建") {
+                    var profile = AccountProfile()
+                    profile.name = newProfileName.isEmpty ? "新账号" : newProfileName
+                    pm.addProfile(profile)
+                    pm.switchProfile(id: profile.id)
+                    loadEditingProfile()
+                    showNewProfileSheet = false
                 }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .foregroundStyle(.white)
+                .background(accentGradient, in: Capsule())
             }
-            .padding(20)
         }
+        .padding(24)
+        .frame(width: 320)
+    }
+
+    // MARK: - Helpers
+
+    private func loadEditingProfile() {
+        if let p = pm.currentProfile {
+            editingProfile = p
+        }
+    }
+
+    private func saveCurrentAndSwitch(to profile: AccountProfile) {
+        // 保存当前编辑的
+        pm.currentProfile = editingProfile
+        pm.save()
+        // 切换并加载
+        pm.switchProfile(id: profile.id)
+        loadEditingProfile()
+        // 重置测试状态
+        wechatTestState = .idle
     }
 
     // MARK: - Actions
@@ -274,38 +373,10 @@ struct SettingsView: View {
         wechatTestState = .testing
         Task {
             do {
-                let msg = try await PublishService.testWechatCredentials(appId: appId, appSecret: appSecret)
+                let msg = try await PublishService.testWechatCredentials(appId: editingProfile.wechatAppId, appSecret: editingProfile.wechatAppSecret)
                 wechatTestState = .success(msg)
             } catch {
                 wechatTestState = .failure(friendlyNetworkError(error))
-            }
-        }
-    }
-
-    private func testImage() {
-        imageTestState = .testing
-        Task {
-            do {
-                let msg = try await PublishService.testImageGeneration(
-                    apiBase: imageApiBase,
-                    apiKey: imageApiKey,
-                    model: imageModel
-                )
-                imageTestState = .success(msg)
-            } catch {
-                imageTestState = .failure(friendlyNetworkError(error))
-            }
-        }
-    }
-
-    private func testClaude() {
-        claudeTestState = .testing
-        Task {
-            do {
-                let msg = try await AIService.testConnection()
-                claudeTestState = .success(msg)
-            } catch {
-                claudeTestState = .failure(error.localizedDescription)
             }
         }
     }
@@ -345,11 +416,11 @@ struct SettingsView: View {
                 }
 
                 switch key {
-                case "WECHAT_APP_ID": appId = value
-                case "WECHAT_APP_SECRET": appSecret = value
-                case "IMAGE_API_KEY": imageApiKey = value
-                case "IMAGE_API_BASE": imageApiBase = value
-                case "IMAGE_MODEL": imageModel = value
+                case "WECHAT_APP_ID": editingProfile.wechatAppId = value
+                case "WECHAT_APP_SECRET": editingProfile.wechatAppSecret = value
+                case "IMAGE_API_KEY": UserDefaults.standard.set(value, forKey: "imageApiKey")
+                case "IMAGE_API_BASE": UserDefaults.standard.set(value, forKey: "imageApiBase")
+                case "IMAGE_MODEL": UserDefaults.standard.set(value, forKey: "imageModel")
                 default: break
                 }
             }
@@ -358,25 +429,10 @@ struct SettingsView: View {
     }
 
     private func syncToState() {
+        pm.currentProfile = editingProfile
+        pm.save()
         guard let state else { return }
-        state.username = username
-        state.wechatAppId = appId
-        state.wechatAppSecret = appSecret
-        state.imageApiBase = imageApiBase
-        state.imageApiKey = imageApiKey
-        state.imageModel = imageModel
-        state.defaultAuthor = defaultAuthor
-
-        let fallbackAuthor = defaultAuthor.isEmpty ? username : defaultAuthor
-        if state.author.isEmpty || state.author == state.defaultAuthor || state.author == state.username {
-            state.author = fallbackAuthor
-        }
-
-        if let r = CreatorRole(rawValue: creatorRole) { state.creatorRole = r }
-        if let s = WritingStyle(rawValue: writingStyle) { state.writingStyle = s }
-        if let a = TargetAudience(rawValue: targetAudience) { state.targetAudience = a }
-        state.needOpenComment = needOpenComment
-        state.onlyFansCanComment = onlyFansCanComment
+        pm.applyToState(state)
     }
 }
 
@@ -390,43 +446,6 @@ enum TestState: Equatable {
 }
 
 // MARK: - Settings Components
-
-struct TabButton: View {
-    let title: String
-    let icon: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: icon)
-                    .font(.system(size: 10, weight: .semibold))
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-            }
-            .foregroundStyle(isSelected ? .white : .secondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
-            .background(
-                isSelected
-                    ? AnyShapeStyle(LinearGradient(
-                        colors: [Color(hue: 0.72, saturation: 0.65, brightness: 0.95),
-                                 Color(hue: 0.58, saturation: 0.70, brightness: 0.90)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing))
-                    : AnyShapeStyle(Color.clear),
-                in: RoundedRectangle(cornerRadius: 7)
-            )
-            .background(
-                !isSelected
-                    ? AnyShapeStyle(Color.primary.opacity(0.04))
-                    : AnyShapeStyle(Color.clear),
-                in: RoundedRectangle(cornerRadius: 7)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-}
 
 struct SettingsCard<Content: View>: View {
     let title: String
