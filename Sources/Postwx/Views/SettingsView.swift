@@ -377,6 +377,12 @@ struct SettingsView: View {
         state.imageModel = imageModel
         state.defaultAuthor = defaultAuthor
 
+        // 同步作者：如果作者为空或等于旧的默认值，则更新为新的默认作者/用户名
+        let fallbackAuthor = defaultAuthor.isEmpty ? username : defaultAuthor
+        if state.author.isEmpty || state.author == state.defaultAuthor || state.author == state.username {
+            state.author = fallbackAuthor
+        }
+
         if let r = CreatorRole(rawValue: creatorRole) { state.creatorRole = r }
         if let s = WritingStyle(rawValue: writingStyle) { state.writingStyle = s }
         if let a = TargetAudience(rawValue: targetAudience) { state.targetAudience = a }

@@ -7,6 +7,8 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var publishError: String?
     @State private var showOriginalContent = false
+    @AppStorage("username") private var storedUsername = ""
+    @AppStorage("defaultAuthor") private var storedDefaultAuthor = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,7 +28,14 @@ struct ContentView: View {
                     .frame(width: 260)
             }
         }
-        .onAppear { loadCredentials() }
+        .onAppear {
+            loadCredentials()
+            // 用 @AppStorage 直接读取，确保作者默认值生效
+            if state.author.isEmpty {
+                let fallback = storedDefaultAuthor.isEmpty ? storedUsername : storedDefaultAuthor
+                if !fallback.isEmpty { state.author = fallback }
+            }
+        }
         .sheet(isPresented: $showSettings) {
             SettingsView(state: state)
                 .interactiveDismissDisabled(false)
@@ -195,12 +204,6 @@ struct ContentView: View {
                         aiStreamingOutput
                     }
 
-                    // 主题配色（仅在审核模式可编辑）
-                    if state.isReviewing || state.workflowState == .idle {
-                        Divider()
-                        themeSection
-                    }
-
                     // AI 状态
                     if state.workflowState == .idle {
                         Divider()
@@ -230,7 +233,11 @@ struct ContentView: View {
         Group {
             LabeledField("标题", text: $state.title, prompt: "自动提取")
                 .disabled(state.isBusy)
-            LabeledField("作者", text: $state.author, prompt: state.defaultAuthor.isEmpty ? "可选" : state.defaultAuthor)
+            LabeledField("作者", text: $state.author, prompt: {
+                    if !storedDefaultAuthor.isEmpty { return storedDefaultAuthor }
+                    if !storedUsername.isEmpty { return storedUsername }
+                    return "可选"
+                }())
                 .disabled(state.isBusy)
             LabeledField("摘要", text: $state.summary, prompt: "自动生成", axis: .vertical)
                 .disabled(state.isBusy)
@@ -252,31 +259,7 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Theme Section
-
-    private var themeSection: some View {
-        Group {
-            Text("主题配色")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-
-            Picker("主题", selection: $state.selectedTheme) {
-                ForEach(Theme.allCases) { t in
-                    Text(t.displayName).tag(t)
-                }
-            }
-            .pickerStyle(.menu)
-            .controlSize(.regular)
-
-            Picker("配色", selection: $state.selectedColor) {
-                ForEach(ThemeColor.allCases) { c in
-                    Text(c.rawValue).tag(c)
-                }
-            }
-            .pickerStyle(.menu)
-            .controlSize(.regular)
-        }
-    }
+    // 主题配色由 AI 自动选择（Step 4）
 
     // MARK: - AI Streaming Output
 
@@ -713,7 +696,9 @@ struct ContentView: View {
         state.content = ""
         state.title = ""
         state.summary = ""
-        state.author = ""
+        // 重置作者为默认值（优先默认作者，其次用户名）
+        let fallback = state.defaultAuthor.isEmpty ? state.username : state.defaultAuthor
+        state.author = fallback
         droppedFileURL = nil
         showOriginalContent = false
         state.resetWorkflow()
@@ -736,6 +721,14 @@ struct ContentView: View {
         state.imageApiKey = defaults.string(forKey: "imageApiKey") ?? ""
         state.imageModel = defaults.string(forKey: "imageModel") ?? ""
         state.defaultAuthor = defaults.string(forKey: "defaultAuthor") ?? ""
+
+        // 自动填充作者：优先使用默认作者，其次使用用户名
+        if state.author.isEmpty {
+            let fallbackAuthor = state.defaultAuthor.isEmpty ? state.username : state.defaultAuthor
+            if !fallbackAuthor.isEmpty {
+                state.author = fallbackAuthor
+            }
+        }
 
         if let role = defaults.string(forKey: "creatorRole"),
            let r = CreatorRole(rawValue: role) {
