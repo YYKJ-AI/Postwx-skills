@@ -16,6 +16,8 @@ final class AppState: @unchecked Sendable {
 
     var workflowState: WorkflowState = .idle
     var stepStatuses: [WorkflowStep: StepStatus] = [:]
+    var stepStartTimes: [WorkflowStep: Date] = [:]
+    var stepDurations: [WorkflowStep: TimeInterval] = [:]
     var publishLog: [String] = []
 
     /// 原始内容（AI 处理前的快照，用于审核时对比）
@@ -66,6 +68,8 @@ final class AppState: @unchecked Sendable {
     func resetWorkflow() {
         workflowState = .idle
         stepStatuses = [:]
+        stepStartTimes = [:]
+        stepDurations = [:]
         publishLog = []
         originalContent = ""
         processedContent = ""
@@ -80,6 +84,11 @@ final class AppState: @unchecked Sendable {
     }
 
     func updateStep(_ step: WorkflowStep, status: StepStatus) {
+        if case .running = status {
+            stepStartTimes[step] = Date()
+        } else if status.isTerminal, let start = stepStartTimes[step] {
+            stepDurations[step] = Date().timeIntervalSince(start)
+        }
         stepStatuses[step] = status
     }
 }
