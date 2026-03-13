@@ -41,7 +41,18 @@ final class AppState: @unchecked Sendable {
     var isPublishing: Bool { workflowState == .publishing }
     var isBusy: Bool { isProcessing || isPublishing }
 
-    // MARK: - Credentials
+    // MARK: - 目标账号（多选）
+
+    var selectedProfileIds: Set<UUID> = []
+    /// 每个账号的发布状态
+    var profilePublishStatuses: [UUID: ProfilePublishStatus] = [:]
+
+    /// 用于 AI 处理的主账号（取第一个选中的）
+    var primaryProfileId: UUID? { selectedProfileIds.sorted(by: { $0.uuidString < $1.uuidString }).first }
+
+    var hasSelectedProfiles: Bool { !selectedProfileIds.isEmpty }
+
+    // MARK: - Credentials（从主账号同步，用于 AI 处理）
 
     var wechatAppId: String = ""
     var wechatAppSecret: String = ""
@@ -49,7 +60,7 @@ final class AppState: @unchecked Sendable {
     var imageApiKey: String = ""
     var imageModel: String = ""
 
-    // MARK: - Preferences
+    // MARK: - Preferences（从选中 Profile 同步）
 
     var creatorRole: CreatorRole = .techBlogger
     var writingStyle: WritingStyle = .professional
@@ -77,6 +88,7 @@ final class AppState: @unchecked Sendable {
         deAIRating = nil
         aiStreamingText = ""
         aiCurrentStep = ""
+        profilePublishStatuses = [:]
     }
 
     func stepStatus(_ step: WorkflowStep) -> StepStatus {
@@ -161,6 +173,13 @@ enum StepStatus: Equatable {
         default: false
         }
     }
+}
+
+enum ProfilePublishStatus: Equatable {
+    case pending
+    case publishing
+    case success(String) // media_id
+    case failed(String)  // error message
 }
 
 enum InputFormat: String {
