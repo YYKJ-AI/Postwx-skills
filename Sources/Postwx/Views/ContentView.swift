@@ -162,15 +162,50 @@ struct ContentView: View {
                 showPreview = true
             }
         }
-        .sheet(isPresented: $showSettings) {
-            SettingsView(state: state)
-                .interactiveDismissDisabled(false)
+        .overlay {
+            if showSettings {
+                ZStack {
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                        .onTapGesture { showSettings = false }
+
+                    SettingsView(state: state, onDismiss: { showSettings = false })
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .shadow(color: .black.opacity(0.3), radius: 20, y: 8)
+                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                }
+                .animation(.easeOut(duration: 0.2), value: showSettings)
+            }
         }
-        .sheet(isPresented: $showGlobalAISettings) {
-            GlobalAISettingsView()
+        .overlay {
+            if showGlobalAISettings {
+                ZStack {
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                        .onTapGesture { showGlobalAISettings = false }
+
+                    GlobalAISettingsView(onDismiss: { showGlobalAISettings = false })
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .shadow(color: .black.opacity(0.3), radius: 20, y: 8)
+                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                }
+                .animation(.easeOut(duration: 0.2), value: showGlobalAISettings)
+            }
         }
-        .sheet(isPresented: $showPersonaLibrary) {
-            PersonaLibraryEditorView(state: state)
+        .overlay {
+            if showPersonaLibrary {
+                ZStack {
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                        .onTapGesture { showPersonaLibrary = false }
+
+                    PersonaLibraryEditorView(state: state, onDismiss: { showPersonaLibrary = false })
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .shadow(color: .black.opacity(0.3), radius: 20, y: 8)
+                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                }
+                .animation(.easeOut(duration: 0.2), value: showPersonaLibrary)
+            }
         }
         .alert("发布失败", isPresented: Binding(
             get: { publishError != nil },
@@ -456,10 +491,10 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "person.crop.rectangle.stack.fill")
-                    .font(.system(size: 13))
+                    .font(.system(size: 14))
                     .foregroundStyle(DS.brandGradient)
                 Text("发布到")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.secondary)
 
                 Spacer()
@@ -474,7 +509,7 @@ struct ContentView: View {
                         }
                         applyPrimaryProfile()
                     }
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
                     .buttonStyle(.plain)
                     .disabled(state.isBusy)
@@ -484,10 +519,10 @@ struct ContentView: View {
             if profileManager.profiles.isEmpty {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 11))
+                        .font(.system(size: 12))
                         .foregroundStyle(.orange)
                     Text("暂无账号，请在设置中添加")
-                        .font(.system(size: 12))
+                        .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                 }
                 .padding(10)
@@ -506,17 +541,17 @@ struct ContentView: View {
                         } label: {
                             HStack(spacing: 8) {
                                 Image(systemName: isSelected ? "checkmark.square.fill" : "square")
-                                    .font(.system(size: 14))
+                                    .font(.system(size: 15))
                                     .foregroundStyle(isSelected ? AnyShapeStyle(DS.wechatGreen) : AnyShapeStyle(.tertiary))
 
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(profile.name)
-                                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                                        .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                                         .foregroundStyle(.primary)
                                         .lineLimit(1)
                                     if let persona = PersonaLibrary.shared.persona(id: profile.personaId) {
                                         Text(persona.displayName)
-                                            .font(.system(size: 10))
+                                            .font(.system(size: 11))
                                             .foregroundStyle(.tertiary)
                                     }
                                 }
@@ -527,7 +562,7 @@ struct ContentView: View {
                                     publishStatusBadge(status)
                                 } else if profile.wechatAppId.isEmpty {
                                     Text("未配置")
-                                        .font(.system(size: 9, weight: .medium))
+                                        .font(.system(size: 11, weight: .medium))
                                         .foregroundStyle(.orange)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
@@ -558,18 +593,18 @@ struct ContentView: View {
         switch status {
         case .pending:
             Image(systemName: "clock")
-                .font(.system(size: 10))
+                .font(.system(size: 12))
                 .foregroundStyle(.secondary)
         case .publishing:
             ProgressView()
                 .controlSize(.mini)
         case .success:
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 12))
+                .font(.system(size: 13))
                 .foregroundStyle(Color(hex: 0x10B981))
         case .failed(let msg):
             Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 12))
+                .font(.system(size: 13))
                 .foregroundStyle(Color(hex: 0xEF4444))
                 .help(msg)
         }
@@ -634,7 +669,7 @@ struct ContentView: View {
                 let total = WorkflowStep.allCases.count
                 if completed > 0 {
                     Text("\(completed)/\(total)")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -740,22 +775,22 @@ struct ContentView: View {
                             switch status {
                             case .success:
                                 Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 10))
+                                    .font(.system(size: 12))
                                     .foregroundStyle(Color(hex: 0x10B981))
                             case .failed:
                                 Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 10))
+                                    .font(.system(size: 12))
                                     .foregroundStyle(Color(hex: 0xEF4444))
                             default:
                                 EmptyView()
                             }
                             Text(profile.name)
-                                .font(.system(size: 11))
+                                .font(.system(size: 13))
                                 .foregroundStyle(.secondary)
                             Spacer()
                             if case .failed(let msg) = status {
                                 Text(msg)
-                                    .font(.system(size: 10))
+                                    .font(.system(size: 11))
                                     .foregroundStyle(Color(hex: 0xEF4444).opacity(0.8))
                                     .lineLimit(1)
                             }
@@ -1175,11 +1210,11 @@ struct TimelineStepRow: View {
 
                 // 步骤图标 + 名称
                 Image(systemName: step.icon)
-                    .font(.system(size: 11))
+                    .font(.system(size: 13))
                     .foregroundStyle(iconTint)
 
                 Text(step.label)
-                    .font(.system(size: 13, weight: status == .running ? .medium : .regular))
+                    .font(.system(size: 14, weight: status == .running ? .medium : .regular))
                     .foregroundStyle(textColor)
 
                 Spacer()
@@ -1190,7 +1225,7 @@ struct TimelineStepRow: View {
                 // 展开箭头（仅有可展开内容时显示）
                 if hasExpandableContent {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.quaternary)
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 }
@@ -1307,32 +1342,32 @@ struct TimelineStepRow: View {
         switch status {
         case .running:
             Text("运行中")
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(DS.wechatGreen)
 
         case .completed(let detail):
             HStack(spacing: 6) {
                 if !detail.isEmpty {
                     Text(detail)
-                        .font(.system(size: 10))
+                        .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
                 if let duration {
                     Text(formatDuration(duration))
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.tertiary)
                 }
             }
 
         case .failed:
             Text("失败")
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Color(hex: 0xEF4444))
 
         case .skipped(let reason):
             Text(reason)
-                .font(.system(size: 10))
+                .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
 
@@ -1352,7 +1387,7 @@ struct TimelineStepRow: View {
                     // AI 实时日志输出 — 等宽字体，深色背景
                     ScrollView {
                         Text(text.suffix(1200))
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: 12, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(10)
@@ -1364,7 +1399,7 @@ struct TimelineStepRow: View {
                         ProgressView()
                             .controlSize(.mini)
                         Text("AI 正在处理...")
-                            .font(.system(size: 11))
+                            .font(.system(size: 12))
                             .foregroundStyle(.tertiary)
                     }
                     .padding(.horizontal, 12)
@@ -1373,7 +1408,7 @@ struct TimelineStepRow: View {
 
             case .failed(let msg):
                 Text(msg)
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                     .foregroundStyle(.red.opacity(0.8))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -1381,7 +1416,7 @@ struct TimelineStepRow: View {
             case .completed(let detail):
                 if !detail.isEmpty {
                     Text(detail)
-                        .font(.system(size: 11))
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -1483,8 +1518,8 @@ struct IconButton: View {
 
     enum ButtonSize {
         case small, regular
-        var dimension: CGFloat { self == .small ? 24 : 32 }
-        var font: CGFloat { self == .small ? 10 : 12 }
+        var dimension: CGFloat { self == .small ? 26 : 34 }
+        var font: CGFloat { self == .small ? 11 : 13 }
         var radius: CGFloat { self == .small ? 5 : 7 }
     }
 

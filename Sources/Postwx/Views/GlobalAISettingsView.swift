@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GlobalAISettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    var onDismiss: (() -> Void)?
 
     @AppStorage("imageApiBase") private var imageApiBase = ""
     @AppStorage("imageApiKey") private var imageApiKey = ""
@@ -32,7 +33,7 @@ struct GlobalAISettingsView: View {
             }
             .overlay(alignment: .trailing) {
                 Button {
-                    dismiss()
+                    onDismiss?() ?? dismiss()
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .bold))

@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(\.colorScheme) private var colorScheme
     var state: AppState?
     var pm = ProfileManager.shared
+    var onDismiss: (() -> Void)?
 
     @State private var editingProfile: AccountProfile = AccountProfile()
     @State private var wechatTestState: TestState = .idle
@@ -28,7 +29,7 @@ struct SettingsView: View {
             HSplitView {
                 // 左侧：账号列表
                 accountList
-                    .frame(width: 150)
+                    .frame(width: 170)
 
                 // 右侧：选中账号的完整配置
                 profileDetail
@@ -83,7 +84,7 @@ struct SettingsView: View {
             Spacer()
         }
         .overlay(alignment: .trailing) {
-            Button { dismiss() } label: {
+            Button { onDismiss?() ?? dismiss() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(.secondary)
@@ -102,48 +103,53 @@ struct SettingsView: View {
     private var accountList: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(spacing: 4) {
+                VStack(spacing: 6) {
                     ForEach(pm.profiles) { profile in
                         let isSelected = profile.id == editingProfile.id
                         Button {
                             saveCurrentAndSwitch(to: profile)
                         } label: {
-                            HStack(spacing: 8) {
+                            HStack(spacing: 10) {
                                 Circle()
                                     .fill(profileColor(for: profile))
-                                    .frame(width: 8, height: 8)
+                                    .frame(width: 9, height: 9)
 
-                                VStack(alignment: .leading, spacing: 1) {
+                                VStack(alignment: .leading, spacing: 2) {
                                     Text(profile.name)
-                                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                                        .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
                                         .foregroundStyle(.primary)
                                         .lineLimit(1)
                                     if let persona = PersonaLibrary.shared.persona(id: profile.personaId) {
                                         Text(persona.displayName)
-                                            .font(.system(size: 10))
+                                            .font(.system(size: 12))
                                             .foregroundStyle(.tertiary)
                                     }
                                 }
 
                                 Spacer()
                             }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 12)
                             .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(isSelected ? Color(hex: 0x07C160).opacity(0.12) : Color.clear)
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(isSelected ? Color(hex: 0x07C160).opacity(0.10) : Color.primary.opacity(0.02))
                             )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(isSelected ? Color(hex: 0x07C160).opacity(0.3) : Color.primary.opacity(0.06), lineWidth: 1)
+                            )
+                            .contentShape(RoundedRectangle(cornerRadius: 8))
                         }
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(8)
+                .padding(10)
             }
 
-            Divider().opacity(0.3)
+            Rectangle().fill(Color.primary.opacity(0.06)).frame(height: 0.5)
 
             // 新建 / 删除
-            HStack(spacing: 2) {
+            HStack(spacing: 4) {
                 SidebarToolbarButton(icon: "plus", help: "新建账号") {
                     newProfileName = ""
                     showNewProfileSheet = true
@@ -157,8 +163,8 @@ struct SettingsView: View {
 
                 Spacer()
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
         }
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
     }
@@ -220,7 +226,7 @@ struct SettingsView: View {
 
                     if let persona = PersonaLibrary.shared.persona(id: editingProfile.personaId) {
                         Text(persona.prompt)
-                            .font(.system(size: 10))
+                            .font(.system(size: 12))
                             .foregroundStyle(.tertiary)
                             .padding(.top, 2)
                     }
@@ -271,7 +277,7 @@ struct SettingsView: View {
                         STextField("模型", text: $imageModel, placeholder: "gpt-image-1")
                     }
                     Text("兼容 OpenAI Images API 格式的服务均可使用")
-                        .font(.system(size: 10))
+                        .font(.system(size: 12))
                         .foregroundStyle(.tertiary)
                     STestButton(state: imageTestState, label: "测试生图",
                                 disabled: imageApiKey.isEmpty) { testImage() }
@@ -294,7 +300,7 @@ struct SettingsView: View {
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(.primary.opacity(0.8))
                             Text(AIService.isAvailable() ? "自动使用系统级认证" : "需要安装 claude CLI")
-                                .font(.system(size: 10))
+                                .font(.system(size: 12))
                                 .foregroundStyle(.tertiary)
                         }
                     }
@@ -304,10 +310,10 @@ struct SettingsView: View {
                     } else {
                         HStack(spacing: 5) {
                             Image(systemName: "terminal")
-                                .font(.system(size: 10))
+                                .font(.system(size: 12))
                                 .foregroundStyle(.tertiary)
                             Text("npm install -g @anthropic-ai/claude-code")
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(.system(size: 12, design: .monospaced))
                                 .foregroundStyle(.tertiary)
                                 .textSelection(.enabled)
                         }
@@ -515,7 +521,7 @@ struct SCard<Content: View>: View {
 
                 if let badge {
                     Text(badge)
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 2)
@@ -636,11 +642,11 @@ struct SidebarToolbarButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(disabled ? Color.secondary.opacity(0.3) : isPressed ? Color.primary : isHovered ? Color.primary.opacity(0.85) : Color.secondary)
-                .frame(width: 32, height: 28)
+                .frame(width: 38, height: 34)
                 .background(
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: 7)
                         .fill(isPressed ? Color.primary.opacity(0.12) : isHovered ? Color.primary.opacity(0.06) : Color.clear)
                 )
                 .scaleEffect(isPressed ? 0.92 : 1.0)
@@ -677,7 +683,7 @@ struct STestButton: View {
                             .font(.system(size: 8))
                     }
                     Text(state == .testing ? "测试中..." : label)
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
@@ -691,16 +697,16 @@ struct STestButton: View {
 
             switch state {
             case .success(let msg):
-                HStack(spacing: 3) {
-                    Image(systemName: "checkmark.circle.fill").font(.system(size: 10))
-                    Text(msg).font(.system(size: 10))
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 12))
+                    Text(msg).font(.system(size: 12))
                 }
                 .foregroundStyle(Color(hex: 0x10B981))
                 .transition(.scale.combined(with: .opacity))
             case .failure(let msg):
-                HStack(spacing: 3) {
-                    Image(systemName: "xmark.circle.fill").font(.system(size: 10))
-                    Text(msg).font(.system(size: 10))
+                HStack(spacing: 4) {
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 12))
+                    Text(msg).font(.system(size: 12))
                 }
                 .foregroundStyle(Color(hex: 0xEF4444))
                 .lineLimit(2)

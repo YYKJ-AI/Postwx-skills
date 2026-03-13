@@ -447,6 +447,7 @@ async function uploadImagesInHtml(
   let firstMediaId = "";
   let updatedHtml = html;
   const allMediaIds: string[] = [];
+  const failedImages: string[] = [];
 
   for (const match of matches) {
     const [fullTag, src] = match;
@@ -475,7 +476,14 @@ async function uploadImagesInHtml(
       }
     } catch (err) {
       console.error(`[wechat-api] Failed to upload ${imagePath}:`, err);
+      failedImages.push(imagePath);
     }
+  }
+
+  if (failedImages.length > 0) {
+    throw new Error(
+      `${failedImages.length} 张图片上传失败，微信不支持外部图片链接:\n${failedImages.map((p) => `  - ${p}`).join("\n")}`,
+    );
   }
 
   return { html: updatedHtml, firstMediaId, allMediaIds };
