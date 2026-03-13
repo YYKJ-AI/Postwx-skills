@@ -591,14 +591,28 @@ struct ContentView: View {
                 Text("工作流")
                     .font(.headline)
                     .foregroundStyle(.primary.opacity(0.7))
-            }
-            .padding(.bottom, 12)
 
-            VStack(alignment: .leading, spacing: 0) {
+                Spacer()
+
+                // 完成计数
+                let completed = WorkflowStep.allCases.filter { state.stepStatus($0).isTerminal }.count
+                let total = WorkflowStep.allCases.count
+                if completed > 0 {
+                    Text("\(completed)/\(total)")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.bottom, 8)
+
+            // 步骤列表 — GitHub Actions 手风琴风格
+            VStack(spacing: 0) {
                 ForEach(Array(WorkflowStep.allCases.enumerated()), id: \.element.id) { index, step in
                     TimelineStepRow(
                         step: step,
                         status: state.stepStatus(step),
+                        duration: state.stepDurations[step],
+                        streamingText: state.aiCurrentStep == step.label ? state.aiStreamingText : nil,
                         isLast: index == WorkflowStep.allCases.count - 1
                     )
                 }
@@ -613,6 +627,7 @@ struct ContentView: View {
                 RoundedRectangle(cornerRadius: DS.r12)
                     .stroke(DS.borderDefault, lineWidth: 0.5)
             )
+            .clipShape(RoundedRectangle(cornerRadius: DS.r12))
         }
     }
 
@@ -1149,124 +1164,256 @@ struct ContentView: View {
 struct TimelineStepRow: View {
     let step: WorkflowStep
     let status: StepStatus
+    var duration: TimeInterval?
+    var streamingText: String?
     var isLast: Bool = false
 
-    var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            VStack(spacing: 0) {
-                stepIndicator
-                    .frame(width: 28, height: 28)
-                if !isLast {
-                    Rectangle()
-                        .fill(lineColor)
-                        .frame(width: 2, height: 16)
-                        .clipShape(Capsule())
-                }
-            }
+    @State private var isExpanded = false
+    @State private var checkmarkTrimEnd: CGFloat = 0
+    @State private var spinAngle: Double = 0
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Image(systemName: step.icon)
-                        .font(.subheadline)
-                        .foregroundStyle(iconTint)
-                    Text(step.label)
-                        .font(status == .running ? .headline : .body)
-                        .foregroundStyle(textColor)
-                }
-
-                switch status {
-                case .completed(let detail):
-                    if !detail.isEmpty {
-                        Text(detail)
-                            .font(.subheadline)
-                            .foregroundStyle(Color(hex: 0x10B981))
-                            .lineLimit(1)
-                    }
-                case .failed(let msg):
-                    Text(msg)
-                        .font(.subheadline)
-                        .foregroundStyle(Color(hex: 0xEF4444))
-                        .lineLimit(2)
-                case .skipped(let reason):
-                    Text(reason)
-                        .font(.subheadline)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                case .running:
-                    Text("处理中...")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(DS.brandGlow.opacity(0.8))
-                default:
-                    EmptyView()
-                }
-            }
-            .padding(.bottom, isLast ? 0 : 2)
-
-            Spacer()
-        }
-        .animation(.spring(duration: 0.4), value: status)
+    private var hasExpandableContent: Bool {
+        if case .running = status { return true }
+        if case .failed = status { return true }
+        if case .completed(let d) = status, !d.isEmpty { return true }
+        return false
     }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // 步骤行（始终可见）— 36pt 行高
+            HStack(spacing: 10) {
+                // 状态图标
+                stepIndicator
+                    .frame(width: 18, height: 18)
+
+                // 步骤图标 + 名称
+                Image(systemName: step.icon)
+                    .font(.system(size: 11))
+                    .foregroundStyle(iconTint)
+
+                Text(step.label)
+                    .font(.system(size: 13, weight: status == .running ? .medium : .regular))
+                    .foregroundStyle(textColor)
+
+                Spacer()
+
+                // 右侧：耗时 / 状态标签
+                rightContent
+
+                // 展开箭头（仅有可展开内容时显示）
+                if hasExpandableContent {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.quaternary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                }
+            }
+            .frame(height: 36)
+            .padding(.horizontal, 12)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard hasExpandableContent else { return }
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isExpanded.toggle()
+                }
+            }
+            .background(
+                status == .running
+                    ? Color.accentColor.opacity(0.04)
+                    : Color.clear
+            )
+
+            // 展开的详情区域
+            if isExpanded {
+                expandedContent
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            // 分隔线
+            if !isLast {
+                Divider()
+                    .padding(.leading, 40)
+            }
+        }
+        .onChange(of: status) { _, newValue in
+            if case .completed = newValue {
+                withAnimation(.spring(duration: 0.35)) {
+                    checkmarkTrimEnd = 1
+                }
+                // 完成时自动折叠
+                withAnimation(.easeInOut(duration: 0.2).delay(0.3)) {
+                    isExpanded = false
+                }
+            }
+            if case .running = newValue {
+                // 运行时自动展开
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isExpanded = true
+                }
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: status)
+    }
+
+    // MARK: - Status Icon
 
     @ViewBuilder
     private var stepIndicator: some View {
         switch status {
         case .pending:
-            ZStack {
-                Circle()
-                    .stroke(Color.secondary.opacity(0.15), lineWidth: 1.5)
-                    .frame(width: 22, height: 22)
-                Text("\(step.rawValue)")
-                    .font(.footnote.bold())
-                    .foregroundStyle(.quaternary)
-            }
+            Circle()
+                .stroke(Color.secondary.opacity(0.25), lineWidth: 1.5)
+
         case .running:
-            ZStack {
-                Circle()
-                    .fill(DS.brandGlow.opacity(0.10))
-                    .frame(width: 24, height: 24)
-                Circle()
-                    .stroke(DS.brandGlow.opacity(0.3), lineWidth: 1.5)
-                    .frame(width: 24, height: 24)
-                ProgressView()
-                    .controlSize(.mini)
-            }
+            Circle()
+                .trim(from: 0, to: 0.7)
+                .stroke(DS.wechatGreen, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .rotationEffect(.degrees(spinAngle))
+                .onAppear {
+                    withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
+                        spinAngle = 360
+                    }
+                }
+
         case .completed:
             ZStack {
                 Circle()
-                    .fill(Color(hex: 0x10B981).opacity(0.12))
-                    .frame(width: 24, height: 24)
-                Image(systemName: "checkmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Color(hex: 0x10B981))
+                    .fill(Color(hex: 0x10B981))
+
+                CheckmarkShape()
+                    .trim(from: 0, to: checkmarkTrimEnd)
+                    .stroke(Color.white, style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                    .frame(width: 8, height: 8)
             }
+            .onAppear {
+                if checkmarkTrimEnd == 0 {
+                    withAnimation(.spring(duration: 0.35).delay(0.05)) {
+                        checkmarkTrimEnd = 1
+                    }
+                }
+            }
+
         case .skipped:
             ZStack {
                 Circle()
-                    .fill(Color.secondary.opacity(0.06))
-                    .frame(width: 24, height: 24)
-                Image(systemName: "forward.fill")
+                    .fill(Color.secondary.opacity(0.12))
+                Image(systemName: "minus")
                     .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.quaternary)
+                    .foregroundStyle(.secondary)
             }
+
         case .failed:
             ZStack {
                 Circle()
-                    .fill(Color(hex: 0xEF4444).opacity(0.12))
-                    .frame(width: 24, height: 24)
-                Image(systemName: "exclamationmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Color(hex: 0xEF4444))
+                    .fill(Color(hex: 0xEF4444))
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.white)
             }
         }
     }
 
-    private var lineColor: Color {
+    // MARK: - Right Content
+
+    @ViewBuilder
+    private var rightContent: some View {
         switch status {
-        case .completed: Color(hex: 0x10B981).opacity(0.25)
-        case .running: DS.brandGlow.opacity(0.20)
-        case .failed: Color(hex: 0xEF4444).opacity(0.20)
-        default: Color.secondary.opacity(0.10)
+        case .running:
+            Text("运行中")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(DS.wechatGreen)
+
+        case .completed(let detail):
+            HStack(spacing: 6) {
+                if !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if let duration {
+                    Text(formatDuration(duration))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+        case .failed:
+            Text("失败")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Color(hex: 0xEF4444))
+
+        case .skipped(let reason):
+            Text(reason)
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+
+        default:
+            EmptyView()
         }
+    }
+
+    // MARK: - Expanded Content
+
+    @ViewBuilder
+    private var expandedContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            switch status {
+            case .running:
+                if let text = streamingText, !text.isEmpty {
+                    // AI 实时日志输出 — 等宽字体，深色背景
+                    ScrollView {
+                        Text(text.suffix(1200))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                    }
+                    .frame(maxHeight: 120)
+                    .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
+                } else {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.mini)
+                        Text("AI 正在处理...")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                }
+
+            case .failed(let msg):
+                Text(msg)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red.opacity(0.8))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+
+            case .completed(let detail):
+                if !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                }
+
+            default:
+                EmptyView()
+            }
+        }
+        .padding(.leading, 28) // 对齐到步骤名
+    }
+
+    // MARK: - Helpers
+
+    private func formatDuration(_ t: TimeInterval) -> String {
+        if t < 1 { return String(format: "%.0fms", t * 1000) }
+        if t < 60 { return String(format: "%.1fs", t) }
+        return String(format: "%.0fm%.0fs", t / 60, t.truncatingRemainder(dividingBy: 60))
     }
 
     private var iconTint: Color {
@@ -1285,6 +1432,18 @@ struct TimelineStepRow: View {
         case .running, .completed, .failed: .primary
         case .skipped: .secondary
         }
+    }
+}
+
+// MARK: - Checkmark Shape
+
+struct CheckmarkShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.width * 0.35, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        return path
     }
 }
 
