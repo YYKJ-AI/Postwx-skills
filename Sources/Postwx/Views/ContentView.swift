@@ -223,45 +223,59 @@ struct ContentView: View {
     // MARK: - Editor Panel
 
     private var editorPanel: some View {
-        ZStack {
-            if showPreview && !state.content.isEmpty {
-                // WeChat phone preview
-                WeChatPreviewView(
-                    content: state.content,
-                    title: state.title,
-                    author: {
-                        if !state.author.isEmpty { return state.author }
-                        if !state.defaultAuthor.isEmpty { return state.defaultAuthor }
-                        if !state.username.isEmpty { return state.username }
-                        return ""
-                    }(),
-                    theme: state.selectedTheme,
-                    color: state.selectedColor,
-                    inputFormat: state.inputFormat
-                )
-                .background(Color(nsColor: .windowBackgroundColor).opacity(0.3))
-            } else if state.isReviewing && showOriginalContent {
-                originalContentView
-            } else if state.content.isEmpty {
-                emptyState
-            } else {
-                VStack(alignment: .leading, spacing: 0) {
-                    if state.isReviewing {
-                        reviewHeader
-                    }
-                    TextEditor(text: $state.content)
-                        .font(.body.monospaced())
-                        .scrollContentBackground(.hidden)
-                        .padding(16)
-                }
+        VStack(spacing: 0) {
+            // 审核模式下多账号切换 Tab（始终显示在顶部）
+            if state.isReviewing && state.profileContents.count > 1 {
+                reviewProfileTabs
+                Divider().opacity(0.3)
             }
 
-            if isHoveringDrop {
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(DS.brandGlow.opacity(0.6), lineWidth: 2)
-                    .background(DS.brandGlow.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
-                    .padding(6)
-                    .allowsHitTesting(false)
+            ZStack {
+                if showPreview && !state.content.isEmpty {
+                    // WeChat phone preview
+                    WeChatPreviewView(
+                        content: state.content,
+                        title: state.title,
+                        author: {
+                            // 审核时优先显示当前账号的作者
+                            if let activeId = state.activeReviewProfileId,
+                               let profile = profileManager.profiles.first(where: { $0.id == activeId }) {
+                                let a = profile.defaultAuthor.isEmpty ? profile.username : profile.defaultAuthor
+                                if !a.isEmpty { return a }
+                            }
+                            if !state.author.isEmpty { return state.author }
+                            if !state.defaultAuthor.isEmpty { return state.defaultAuthor }
+                            if !state.username.isEmpty { return state.username }
+                            return ""
+                        }(),
+                        theme: state.selectedTheme,
+                        color: state.selectedColor,
+                        inputFormat: state.inputFormat
+                    )
+                    .background(Color(nsColor: .windowBackgroundColor).opacity(0.3))
+                } else if state.isReviewing && showOriginalContent {
+                    originalContentView
+                } else if state.content.isEmpty {
+                    emptyState
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if state.isReviewing {
+                            reviewHeader
+                        }
+                        TextEditor(text: $state.content)
+                            .font(.body.monospaced())
+                            .scrollContentBackground(.hidden)
+                            .padding(16)
+                    }
+                }
+
+                if isHoveringDrop {
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(DS.brandGlow.opacity(0.6), lineWidth: 2)
+                        .background(DS.brandGlow.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+                        .padding(6)
+                        .allowsHitTesting(false)
+                }
             }
         }
         .background(showPreview && !state.content.isEmpty ? Color.clear : DS.surfaceInput)
@@ -304,9 +318,17 @@ struct ContentView: View {
                 Circle()
                     .fill(DS.brandGradient)
                     .frame(width: 7, height: 7)
-                Text("AI 处理后（可编辑）")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
+                if let activeId = state.activeReviewProfileId,
+                   let profile = profileManager.profiles.first(where: { $0.id == activeId }),
+                   state.profileContents.count > 1 {
+                    Text("\(profile.name) · AI 处理后（可编辑）")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("AI 处理后（可编辑）")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer()
             if let score = state.deAIScore {
@@ -316,6 +338,50 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.top, 12)
         .padding(.bottom, 6)
+    }
+
+    private var reviewProfileTabs: some View {
+        let sortedIds = Array(state.profileContents.keys).sorted { $0.uuidString < $1.uuidString }
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                ForEach(sortedIds, id: \.self) { profileId in
+                    let isActive = profileId == state.activeReviewProfileId
+                    if let profile = profileManager.profiles.first(where: { $0.id == profileId }) {
+                        Button {
+                            switchReviewProfile(to: profileId)
+                        } label: {
+                            HStack(spacing: 5) {
+                                if let persona = PersonaLibrary.shared.persona(id: profile.personaId) {
+                                    Text(persona.displayName)
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(isActive ? .white.opacity(0.8) : .secondary)
+                                }
+                                Text(profile.name)
+                                    .font(.system(size: 12, weight: isActive ? .semibold : .regular))
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(isActive ? DS.wechatGreen : Color.clear)
+                            .foregroundStyle(isActive ? .white : .primary)
+                            .clipShape(RoundedRectangle(cornerRadius: DS.r6))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+        }
+    }
+
+    private func switchReviewProfile(to newId: UUID) {
+        // 保存当前编辑内容到旧账号
+        if let currentId = state.activeReviewProfileId {
+            state.profileContents[currentId] = state.content
+        }
+        // 加载新账号的内容
+        state.activeReviewProfileId = newId
+        state.content = state.profileContents[newId] ?? state.originalContent
     }
 
     // MARK: - Empty State
@@ -792,13 +858,31 @@ struct ContentView: View {
                                 Text(msg)
                                     .font(.system(size: 11))
                                     .foregroundStyle(Color(hex: 0xEF4444).opacity(0.8))
-                                    .lineLimit(1)
+                                    .lineLimit(3)
+                                    .textSelection(.enabled)
                             }
                         }
                     }
                 }
             }
             .padding(.horizontal, 8)
+
+            // 发布日志（可折叠）
+            if !state.publishLog.isEmpty {
+                DisclosureGroup("发布日志") {
+                    ScrollView {
+                        Text(state.publishLog.joined(separator: "\n"))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    .frame(maxHeight: 200)
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 18)
@@ -911,17 +995,18 @@ struct ContentView: View {
         state.workflowState = .processing
         state.stepStatuses = [:]
         state.publishLog = []
+        state.profileContents = [:]
         state.originalContent = state.content
         showOriginalContent = false
 
         Task {
             do {
-                var content = state.content
+                let originalContent = state.content
                 var title = state.title
                 var summary = state.summary
 
                 state.updateStep(.inputDetection, status: .running)
-                let format = PublishService.detectInputFormat(content: content, fileURL: droppedFileURL)
+                let format = PublishService.detectInputFormat(content: originalContent, fileURL: droppedFileURL)
                 state.inputFormat = format
                 state.updateStep(.inputDetection, status: .completed(format.rawValue))
 
@@ -930,88 +1015,134 @@ struct ContentView: View {
                     state.updateStep(.deAI, status: .skipped("HTML 直接发布"))
                     state.updateStep(.themeSelection, status: .skipped("HTML 直接发布"))
                     state.updateStep(.imageGeneration, status: .skipped("HTML 直接发布"))
-                    state.processedContent = content
+                    // HTML 模式所有账号共享同一份内容
+                    for id in state.selectedProfileIds {
+                        state.profileContents[id] = originalContent
+                    }
+                    state.processedContent = originalContent
+                    state.activeReviewProfileId = state.primaryProfileId
                     state.workflowState = .reviewing
                     return
                 }
 
+                // 收集需要处理的账号及其人设
+                let selectedIds = Array(state.selectedProfileIds).sorted { $0.uuidString < $1.uuidString }
+                let profiles = profileManager.profiles
+
                 if AIService.isAvailable() {
-                    guard let persona = PersonaLibrary.shared.persona(id: state.personaId) else {
-                        state.updateStep(.roleAdaptation, status: .failed("未找到人设配置，请检查设置"))
-                        state.workflowState = .failed("人设配置缺失")
-                        return
-                    }
+                    // --- 逐账号独立 AI 适配 ---
+                    var personaNames: [String] = []
 
                     state.updateStep(.roleAdaptation, status: .running)
-                    state.aiCurrentStep = "角色适配"
-                    state.aiStreamingText = ""
-                    do {
-                        content = try await AIService.adaptRole(
-                            content: content, persona: persona,
-                            onStream: { [state] chunk in Task { @MainActor in state.aiStreamingText += chunk } }
-                        )
-                        state.content = content
-                        state.updateStep(.roleAdaptation, status: .completed(persona.displayName))
-                    } catch {
-                        state.updateStep(.roleAdaptation, status: .failed(error.localizedDescription))
-                    }
+                    for (i, profileId) in selectedIds.enumerated() {
+                        guard let profile = profiles.first(where: { $0.id == profileId }) else { continue }
+                        guard let persona = PersonaLibrary.shared.persona(id: profile.personaId) else { continue }
 
+                        let label = "\(profile.name)(\(persona.displayName))"
+                        state.aiCurrentStep = "角色适配 [\(i+1)/\(selectedIds.count)] \(label)"
+                        state.aiStreamingText = ""
+
+                        var content = originalContent
+                        do {
+                            content = try await AIService.adaptRole(
+                                content: content, persona: persona,
+                                onStream: { [state] chunk in Task { @MainActor in state.aiStreamingText += chunk } }
+                            )
+                            personaNames.append(label)
+                        } catch {
+                            // 适配失败则保留原文
+                        }
+
+                        state.profileContents[profileId] = content
+                    }
+                    state.updateStep(.roleAdaptation, status: .completed(personaNames.joined(separator: " / ")))
+
+                    // --- 逐账号去 AI 味 ---
                     state.updateStep(.deAI, status: .running)
-                    state.aiCurrentStep = "去 AI 味"
-                    state.aiStreamingText = ""
-                    do {
-                        let deAIResult = try await AIService.deAI(
-                            content: content, persona: persona,
-                            onStream: { [state] chunk in Task { @MainActor in state.aiStreamingText += chunk } }
-                        )
-                        content = deAIResult.content
-                        state.content = content
-                        state.deAIScore = deAIResult.score
-                        state.deAIRating = deAIResult.rating
-                        let scoreText = deAIResult.score.map { "\($0)/50" } ?? ""
-                        let ratingText = deAIResult.rating ?? ""
-                        state.updateStep(.deAI, status: .completed(
-                            [scoreText, ratingText].filter { !$0.isEmpty }.joined(separator: " ")
-                        ))
-                    } catch {
-                        state.updateStep(.deAI, status: .failed(error.localizedDescription))
-                    }
+                    var lastScore: Int?
+                    var lastRating: String?
+                    for (i, profileId) in selectedIds.enumerated() {
+                        guard let profile = profiles.first(where: { $0.id == profileId }) else { continue }
+                        guard let persona = PersonaLibrary.shared.persona(id: profile.personaId) else { continue }
+                        guard var content = state.profileContents[profileId] else { continue }
 
+                        state.aiCurrentStep = "去 AI 味 [\(i+1)/\(selectedIds.count)] \(profile.name)"
+                        state.aiStreamingText = ""
+
+                        do {
+                            let deAIResult = try await AIService.deAI(
+                                content: content, persona: persona,
+                                onStream: { [state] chunk in Task { @MainActor in state.aiStreamingText += chunk } }
+                            )
+                            content = deAIResult.content
+                            lastScore = deAIResult.score
+                            lastRating = deAIResult.rating
+                        } catch {
+                            // 去AI味失败则保留当前内容
+                        }
+
+                        state.profileContents[profileId] = content
+                    }
+                    state.deAIScore = lastScore
+                    state.deAIRating = lastRating
+                    let scoreText = lastScore.map { "\($0)/50" } ?? ""
+                    let ratingText = lastRating ?? ""
+                    state.updateStep(.deAI, status: .completed(
+                        [scoreText, ratingText].filter { !$0.isEmpty }.joined(separator: " ")
+                    ))
+
+                    // --- 标题和摘要（基于主账号内容生成一次） ---
+                    let primaryContent = state.profileContents[selectedIds.first ?? UUID()] ?? originalContent
                     if title.isEmpty {
-                        title = try await AIService.generateTitle(content: content)
+                        title = try await AIService.generateTitle(content: primaryContent)
                         state.title = title
                     }
                     if summary.isEmpty {
-                        summary = try await AIService.generateSummary(content: content, title: title)
+                        summary = try await AIService.generateSummary(content: primaryContent, title: title)
                         state.summary = summary
                     }
 
+                    // --- 主题配色（基于主账号人设选一次） ---
                     state.updateStep(.themeSelection, status: .running)
-                    do {
-                        let themeResult = try await AIService.selectTheme(content: content, persona: persona)
-                        state.selectedTheme = themeResult.theme
-                        state.selectedColor = themeResult.color
-                        state.updateStep(.themeSelection, status: .completed(
-                            "\(themeResult.theme.displayName) · \(themeResult.color.rawValue)"
-                        ))
-                    } catch {
-                        state.updateStep(.themeSelection, status: .failed(error.localizedDescription))
+                    if let firstProfile = profiles.first(where: { $0.id == selectedIds.first }),
+                       let firstPersona = PersonaLibrary.shared.persona(id: firstProfile.personaId) {
+                        do {
+                            let themeResult = try await AIService.selectTheme(content: primaryContent, persona: firstPersona)
+                            state.selectedTheme = themeResult.theme
+                            state.selectedColor = themeResult.color
+                            state.updateStep(.themeSelection, status: .completed(
+                                "\(themeResult.theme.displayName) · \(themeResult.color.rawValue)"
+                            ))
+                        } catch {
+                            state.updateStep(.themeSelection, status: .failed(error.localizedDescription))
+                        }
+                    } else {
+                        state.updateStep(.themeSelection, status: .skipped("无可用人设"))
                     }
 
+                    // --- 逐账号 AI 配图 ---
                     if !state.imageApiKey.isEmpty {
                         state.updateStep(.imageGeneration, status: .running)
-                        do {
-                            let images = try await AIService.analyzeImages(content: content, title: title)
-                            if images.isEmpty {
-                                state.updateStep(.imageGeneration, status: .completed("无需插图"))
-                            } else {
-                                content = PublishService.insertImagePlaceholders(content: content, images: images)
-                                state.content = content
-                                state.updateStep(.imageGeneration, status: .completed("已插入 \(images.count) 张配图提示"))
+                        var totalImages = 0
+                        for (i, profileId) in selectedIds.enumerated() {
+                            guard let profile = profiles.first(where: { $0.id == profileId }) else { continue }
+                            guard var content = state.profileContents[profileId] else { continue }
+
+                            state.aiCurrentStep = "AI 配图 [\(i+1)/\(selectedIds.count)] \(profile.name)"
+                            do {
+                                let images = try await AIService.analyzeImages(content: content, title: title)
+                                if !images.isEmpty {
+                                    content = PublishService.insertImagePlaceholders(content: content, images: images)
+                                    state.profileContents[profileId] = content
+                                    totalImages += images.count
+                                }
+                            } catch {
+                                // 配图失败不阻塞
                             }
-                        } catch {
-                            state.updateStep(.imageGeneration, status: .failed(error.localizedDescription))
                         }
+                        state.updateStep(.imageGeneration, status: .completed(
+                            totalImages == 0 ? "无需插图" : "已插入 \(totalImages) 张配图提示"
+                        ))
                     } else {
                         state.updateStep(.imageGeneration, status: .skipped("未配置 IMAGE_API_KEY"))
                     }
@@ -1020,11 +1151,19 @@ struct ContentView: View {
                     state.updateStep(.deAI, status: .skipped("Claude CLI 未安装"))
                     state.updateStep(.themeSelection, status: .skipped("Claude CLI 未安装"))
                     state.updateStep(.imageGeneration, status: .skipped("Claude CLI 未安装"))
+                    // 无 AI 时所有账号共享原始内容
+                    for id in selectedIds {
+                        state.profileContents[id] = originalContent
+                    }
                 }
 
                 state.aiStreamingText = ""
                 state.aiCurrentStep = ""
-                state.processedContent = content
+                // 将主账号内容加载到编辑器
+                let firstId = selectedIds.first
+                state.activeReviewProfileId = firstId
+                state.content = state.profileContents[firstId ?? UUID()] ?? originalContent
+                state.processedContent = state.content
                 state.updateStep(.publishing, status: .pending)
                 state.workflowState = .reviewing
             } catch {
@@ -1038,12 +1177,16 @@ struct ContentView: View {
         state.workflowState = .publishing
         state.updateStep(.publishing, status: .running)
 
+        // 保存当前编辑器中的内容到对应账号
+        if let activeId = state.activeReviewProfileId {
+            state.profileContents[activeId] = state.content
+        }
+
         // 初始化每个选中账号的发布状态
         for id in state.selectedProfileIds {
             state.profilePublishStatuses[id] = .pending
         }
 
-        let content = state.content
         let title = state.title
         let summary = state.summary
         let format = state.inputFormat
@@ -1051,27 +1194,15 @@ struct ContentView: View {
         let color = state.selectedColor
         let profileIds = state.selectedProfileIds
         let profiles = profileManager.profiles
+        let profileContents = state.profileContents
         let d = UserDefaults.standard
         let globalImageApiBase = d.string(forKey: "imageApiBase") ?? ""
         let globalImageApiKey = d.string(forKey: "imageApiKey") ?? ""
         let globalImageModel = d.string(forKey: "imageModel") ?? ""
 
         Task {
-            // 准备文件（所有账号共享同一份内容文件）
-            let filePath: String
-            if format == .html {
-                let dir = "/tmp/postwx/\(formattedDate())"
-                try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-                filePath = "\(dir)/\(PublishService.generateSlug(from: title)).html"
-                try? content.write(toFile: filePath, atomically: true, encoding: .utf8)
-            } else {
-                filePath = PublishService.saveTempMarkdown(
-                    content: content,
-                    title: title
-                )
-            }
 
-            // 逐账号发布
+            // 逐账号发布（每个账号使用独立适配的内容）
             var successCount = 0
             var failCount = 0
             var lastMediaId = ""
@@ -1089,8 +1220,37 @@ struct ContentView: View {
                     continue
                 }
 
+                // 获取该账号独立适配后的内容
+                let accountContent = profileContents[profileId] ?? profileContents.values.first ?? ""
+                guard !accountContent.isEmpty else {
+                    state.profilePublishStatuses[profileId] = .failed("无内容")
+                    failCount += 1
+                    continue
+                }
+
+                // 为该账号准备独立的内容文件
+                let filePath: String
+                if format == .html {
+                    let dir = "/tmp/postwx/\(formattedDate())"
+                    try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+                    let slug = PublishService.generateSlug(from: title)
+                    filePath = "\(dir)/\(slug)-\(profile.name).html"
+                    try? accountContent.write(toFile: filePath, atomically: true, encoding: .utf8)
+                } else {
+                    let slug = PublishService.generateSlug(from: title.isEmpty ? String(accountContent.prefix(50)) : title)
+                    let dir = "/tmp/postwx/\(formattedDate())"
+                    try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+                    filePath = "\(dir)/\(slug)-\(profile.name).md"
+                    var md = ""
+                    if !title.isEmpty { md += "# \(title)\n\n" }
+                    md += accountContent
+                    try? md.write(toFile: filePath, atomically: true, encoding: .utf8)
+                }
+
                 state.profilePublishStatuses[profileId] = .publishing
                 state.publishLog.append("[\(profile.name)] 开始发布...")
+                state.publishLog.append("[\(profile.name)] 文件: \(filePath), 内容长度: \(accountContent.count)")
+                state.publishLog.append("[\(profile.name)] IMAGE_API_KEY: \(globalImageApiKey.isEmpty ? "未配置" : "已配置(\(globalImageApiKey.prefix(8))...)")")
 
                 do {
                     let credentials = PublishService.Credentials(
@@ -1130,9 +1290,12 @@ struct ContentView: View {
                     successCount += 1
                     state.publishLog.append("[\(profile.name)] 发布成功")
                 } catch {
-                    state.profilePublishStatuses[profileId] = .failed(error.localizedDescription)
+                    let errMsg = error.localizedDescription
+                    state.profilePublishStatuses[profileId] = .failed(errMsg)
                     failCount += 1
-                    state.publishLog.append("[\(profile.name)] 发布失败: \(error.localizedDescription)")
+                    state.publishLog.append("[\(profile.name)] 发布失败: \(errMsg)")
+                    // 详细错误输出（用于调试）
+                    state.publishLog.append("[\(profile.name)] 错误类型: \(type(of: error)), 详情: \(error)")
                 }
             }
 
@@ -1147,7 +1310,15 @@ struct ContentView: View {
             } else {
                 state.updateStep(.publishing, status: .failed("全部失败 (\(failCount)/\(total))"))
                 state.workflowState = .failed("所有账号发布失败")
-                publishError = "所有账号发布均失败，请检查凭证配置"
+                // 收集每个账号的具体错误信息
+                let errorDetails = state.profilePublishStatuses.compactMap { (id, status) -> String? in
+                    if case .failed(let msg) = status {
+                        let name = profiles.first(where: { $0.id == id })?.name ?? "未知"
+                        return "[\(name)] \(msg)"
+                    }
+                    return nil
+                }.joined(separator: "\n")
+                publishError = errorDetails.isEmpty ? "所有账号发布均失败" : errorDetails
             }
         }
     }

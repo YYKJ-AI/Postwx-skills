@@ -46,6 +46,10 @@ final class AppState: @unchecked Sendable {
     var selectedProfileIds: Set<UUID> = []
     /// 每个账号的发布状态
     var profilePublishStatuses: [UUID: ProfilePublishStatus] = [:]
+    /// 每个账号独立适配后的内容
+    var profileContents: [UUID: String] = [:]
+    /// 审核时当前查看的账号
+    var activeReviewProfileId: UUID?
 
     /// 用于 AI 处理的主账号（取第一个选中的）
     var primaryProfileId: UUID? { selectedProfileIds.sorted(by: { $0.uuidString < $1.uuidString }).first }
@@ -87,6 +91,8 @@ final class AppState: @unchecked Sendable {
         aiStreamingText = ""
         aiCurrentStep = ""
         profilePublishStatuses = [:]
+        profileContents = [:]
+        activeReviewProfileId = nil
     }
 
     func stepStatus(_ step: WorkflowStep) -> StepStatus {

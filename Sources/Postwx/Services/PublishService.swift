@@ -153,6 +153,20 @@ struct PublishService {
         process.currentDirectoryURL = URL(fileURLWithPath: scriptsDir)
 
         var env = ProcessInfo.processInfo.environment
+        // macOS GUI 应用的 PATH 可能不含 homebrew/bun 等路径，需要补充
+        let extraPaths = [
+            "\(NSHomeDirectory())/.bun/bin",
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/usr/local/bin",
+            "\(NSHomeDirectory())/.npm-global/bin",
+            "\(NSHomeDirectory())/.nvm/versions/node/*/bin",  // nvm
+        ]
+        let currentPath = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        let missingPaths = extraPaths.filter { !currentPath.contains($0) }
+        if !missingPaths.isEmpty {
+            env["PATH"] = (missingPaths + [currentPath]).joined(separator: ":")
+        }
         env["WECHAT_APP_ID"] = credentials.wechatAppId
         env["WECHAT_APP_SECRET"] = credentials.wechatAppSecret
         if !credentials.imageApiKey.isEmpty {
@@ -200,9 +214,15 @@ struct PublishService {
                 if !errorOutput.isEmpty { onLog(errorOutput) }
 
                 if proc.terminationStatus != 0 {
-                    continuation.resume(throwing: PublishError.scriptFailed(
-                        errorOutput.isEmpty ? output : errorOutput
-                    ))
+                    // 从 stderr 提取关键错误行（Error/failed/exception），过滤进度日志
+                    let allOutput = errorOutput.isEmpty ? output : errorOutput
+                    let errorLines = allOutput.components(separatedBy: .newlines).filter { line in
+                        let lower = line.lowercased()
+                        return lower.contains("error") || lower.contains("failed") ||
+                               lower.contains("exception") || lower.contains("张图片上传失败")
+                    }
+                    let errorMsg = errorLines.isEmpty ? allOutput : errorLines.joined(separator: "\n")
+                    continuation.resume(throwing: PublishError.scriptFailed(errorMsg))
                 } else {
                     continuation.resume(returning: output)
                 }
