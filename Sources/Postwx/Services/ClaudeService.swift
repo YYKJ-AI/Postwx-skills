@@ -245,32 +245,22 @@ struct AIService {
 
     static func adaptRole(
         content: String,
-        role: CreatorRole,
-        style: WritingStyle,
-        audience: TargetAudience,
+        persona: PersonaItem,
         onStream: (@Sendable (String) -> Void)? = nil
     ) async throws -> String {
         let system = """
-        你是一位资深内容编辑，负责根据创作者角色、写作风格和目标受众对文章进行适配调整。
+        你是一位资深内容编辑，负责根据创作者人设对文章进行适配调整。
 
-        ## 创作者角色：\(role.displayName)
-        适配方式：\(role.adaptationGuide)
-
-        ## 写作风格：\(style.displayName)
-        适配方式：\(style.adaptationGuide)
-
-        ## 目标受众：\(audience.displayName)
-        适配方式：\(audience.adaptationGuide)
+        ## 创作人设：\(persona.displayName)
+        \(persona.prompt)
 
         ## 规则
         1. 保持原文核心信息和结构不变
-        2. 根据角色调整专业深度和表达方式
-        3. 根据风格调整语气和措辞
-        4. 根据受众调整术语使用和解释深度
-        5. 保留所有 Markdown 格式标记（标题、列表、代码块、链接等）
-        6. 保留所有图片标记（包括 __generate: 占位符）
-        7. 去除 YAML frontmatter（即文章开头 --- ... --- 包裹的元数据块，如 tags、created、date 等），输出中不要包含 frontmatter
-        8. 只输出适配后的全文，不要任何解释或前言
+        2. 根据人设调整专业深度、语气措辞和表达方式
+        3. 保留所有 Markdown 格式标记（标题、列表、代码块、链接等）
+        4. 保留所有图片标记（包括 __generate: 占位符）
+        5. 去除 YAML frontmatter（即文章开头 --- ... --- 包裹的元数据块，如 tags、created、date 等），输出中不要包含 frontmatter
+        6. 只输出适配后的全文，不要任何解释或前言
         """
 
         return try await callClaude(system: system, userMessage: content, onStream: onStream)
@@ -280,7 +270,7 @@ struct AIService {
 
     static func deAI(
         content: String,
-        writingStyle: WritingStyle,
+        persona: PersonaItem,
         onStream: (@Sendable (String) -> Void)? = nil
     ) async throws -> DeAIResult {
         let system = """
@@ -322,8 +312,8 @@ struct AIService {
         23. 谄媚语气（非常好的问题）→ 删除
         24. 交流特征（让我来为您解释）→ 删除
 
-        ## 写作风格参考：\(writingStyle.displayName)
-        \(writingStyle.adaptationGuide)
+        ## 人设风格参考：\(persona.displayName)
+        \(persona.prompt)
 
         ## 输出格式
         先输出润色后的全文，然后在最后一行输出评分，格式如下：
@@ -379,7 +369,7 @@ struct AIService {
 
     // MARK: - Step 4: 智能选择主题配色
 
-    static func selectTheme(content: String, role: CreatorRole) async throws -> ThemeSelection {
+    static func selectTheme(content: String, persona: PersonaItem) async throws -> ThemeSelection {
         let system = """
         你是一位微信公众号排版专家。根据文章内容和创作者角色，选择最合适的主题和配色。
 
@@ -400,7 +390,7 @@ struct AIService {
         设计/创意 → grace + vermilion 或 pink
         科普/知识 → default + sky 或 green
 
-        ## 创作者角色：\(role.displayName)
+        ## 创作人设：\(persona.displayName)
 
         ## 输出格式（严格 JSON，不要其他内容）
         {"theme":"主题名","color":"配色名","reason":"一句话理由"}
@@ -433,16 +423,16 @@ struct AIService {
     // MARK: - Step 5: AI 配图分析
 
     static func analyzeImages(content: String, title: String) async throws -> [ImageSuggestion] {
+        let imageStyles = await PersonaLibrary.shared.data.imageStyles
+        let styleList = imageStyles.enumerated().map { (i, s) in
+            "\(i + 1). \(s.id): \(s.useCase) — \(s.colorPalette)"
+        }.joined(separator: "\n")
+
         let system = """
         你是一位公众号配图专家。分析文章内容，决定是否需要插图，如果需要则生成图片提示词。
 
-        ## 6 种图片风格
-        1. vector: 技术文章、教程、知识科普 — Cream底#F5F0E6, Coral#E07A5F, Mint#81B29A, Mustard#F2CC8F
-        2. watercolor: 生活方式、旅行、情感散文 — Earth色系, 柔和边缘
-        3. minimal: 观点文章、深度思考 — 黑白#000/#374151, 白底, 60%+留白
-        4. warm: 个人故事、成长感悟 — Cream底#FFFAF0, Orange#ED8936, Golden#F6AD55
-        5. blueprint: API文档、系统设计 — Off-White底#FAF8F5, Blue#2563EB, Navy
-        6. notion: 产品指南、工具教程 — 白底, 黑#1A1A1A, 淡蓝/淡黄/淡粉点缀
+        ## \(imageStyles.count) 种图片风格
+        \(styleList)
 
         ## 提示词模板
         [风格描述]. [主题内容]. [构图要求]. [色彩方案]. Clean composition with generous white space. Human figures: simplified stylized silhouettes, not photorealistic.

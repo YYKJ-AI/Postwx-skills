@@ -13,9 +13,7 @@ struct AccountProfile: Codable, Identifiable, Equatable {
 
     var username: String = ""
     var defaultAuthor: String = ""
-    var creatorRole: String = "tech-blogger"
-    var writingStyle: String = "professional"
-    var targetAudience: String = "general"
+    var personaId: String = "tech-blogger"
     var needOpenComment: Bool = true
     var onlyFansCanComment: Bool = false
 }

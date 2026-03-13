@@ -62,9 +62,7 @@ final class AppState: @unchecked Sendable {
 
     // MARK: - Preferences（从选中 Profile 同步）
 
-    var creatorRole: CreatorRole = .techBlogger
-    var writingStyle: WritingStyle = .professional
-    var targetAudience: TargetAudience = .general
+    var personaId: String = "tech-blogger"
     var username: String = ""
     var defaultAuthor: String = ""
     var needOpenComment: Bool = true
@@ -215,77 +213,3 @@ enum ThemeColor: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-// MARK: - Creator Settings
-
-enum CreatorRole: String, CaseIterable, Identifiable {
-    case techBlogger = "tech-blogger"
-    case lifestyleWriter = "lifestyle-writer"
-    case educator
-    case businessAnalyst = "business-analyst"
-
-    var id: String { rawValue }
-    var displayName: String {
-        switch self {
-        case .techBlogger: "技术博主"
-        case .lifestyleWriter: "生活作者"
-        case .educator: "教育者"
-        case .businessAnalyst: "商业分析"
-        }
-    }
-
-    var adaptationGuide: String {
-        switch self {
-        case .techBlogger: "技术术语保留，加入实用性观点，结构清晰，代码示例规范"
-        case .lifestyleWriter: "口语化表达，加入个人感受和场景描写，拉近与读者距离"
-        case .educator: "层次分明，循序渐进，加入总结要点，引导读者思考"
-        case .businessAnalyst: "数据支撑，行业视角，趋势分析，专业术语得当"
-        }
-    }
-}
-
-enum WritingStyle: String, CaseIterable, Identifiable {
-    case professional, casual, humorous, academic
-
-    var id: String { rawValue }
-    var displayName: String {
-        switch self {
-        case .professional: "专业"
-        case .casual: "随性"
-        case .humorous: "幽默"
-        case .academic: "学术"
-        }
-    }
-
-    var adaptationGuide: String {
-        switch self {
-        case .professional: "严谨用词，逻辑清晰，适度使用专业术语"
-        case .casual: "亲切自然，适当口语化，拉近距离"
-        case .humorous: "加入巧妙比喻，轻松表达，保持信息量"
-        case .academic: "规范引用，严格论证，学术用语"
-        }
-    }
-}
-
-enum TargetAudience: String, CaseIterable, Identifiable {
-    case general, industry, students
-    case techCommunity = "tech-community"
-
-    var id: String { rawValue }
-    var displayName: String {
-        switch self {
-        case .general: "大众"
-        case .industry: "行业人士"
-        case .students: "学生"
-        case .techCommunity: "技术社区"
-        }
-    }
-
-    var adaptationGuide: String {
-        switch self {
-        case .general: "通俗易懂，避免术语堆砌，多用类比"
-        case .industry: "行业术语，深度分析，同行视角"
-        case .students: "教学口吻，知识点标注，循序渐进"
-        case .techCommunity: "代码示例，技术深度，实践导向"
-        }
-    }
-}

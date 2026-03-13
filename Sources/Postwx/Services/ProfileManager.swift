@@ -67,9 +67,7 @@ final class ProfileManager {
         state.imageApiKey = d.string(forKey: "imageApiKey") ?? ""
         state.imageModel = d.string(forKey: "imageModel") ?? ""
 
-        if let r = CreatorRole(rawValue: p.creatorRole) { state.creatorRole = r }
-        if let s = WritingStyle(rawValue: p.writingStyle) { state.writingStyle = s }
-        if let a = TargetAudience(rawValue: p.targetAudience) { state.targetAudience = a }
+        state.personaId = p.personaId
 
         let fallbackAuthor = p.defaultAuthor.isEmpty ? p.username : p.defaultAuthor
         if state.author.isEmpty || state.author != fallbackAuthor {
@@ -86,15 +84,12 @@ final class ProfileManager {
         state.needOpenComment = p.needOpenComment
         state.onlyFansCanComment = p.onlyFansCanComment
 
-        // AI 配图从全局 UserDefaults 加载
         let d = UserDefaults.standard
         state.imageApiBase = d.string(forKey: "imageApiBase") ?? ""
         state.imageApiKey = d.string(forKey: "imageApiKey") ?? ""
         state.imageModel = d.string(forKey: "imageModel") ?? ""
 
-        if let r = CreatorRole(rawValue: p.creatorRole) { state.creatorRole = r }
-        if let s = WritingStyle(rawValue: p.writingStyle) { state.writingStyle = s }
-        if let a = TargetAudience(rawValue: p.targetAudience) { state.targetAudience = a }
+        state.personaId = p.personaId
 
         let fallbackAuthor = p.defaultAuthor.isEmpty ? p.username : p.defaultAuthor
         if state.author.isEmpty || state.author != fallbackAuthor {
@@ -108,9 +103,7 @@ final class ProfileManager {
         p.wechatAppSecret = state.wechatAppSecret
         p.username = state.username
         p.defaultAuthor = state.defaultAuthor
-        p.creatorRole = state.creatorRole.rawValue
-        p.writingStyle = state.writingStyle.rawValue
-        p.targetAudience = state.targetAudience.rawValue
+        p.personaId = state.personaId
         p.needOpenComment = state.needOpenComment
         p.onlyFansCanComment = state.onlyFansCanComment
         currentProfile = p
@@ -153,10 +146,7 @@ final class ProfileManager {
         let appId = d.string(forKey: "wechatAppId") ?? ""
         let appSecret = d.string(forKey: "wechatAppSecret") ?? ""
 
-        // 只有存在旧数据时才迁移
         guard !appId.isEmpty || !appSecret.isEmpty else { return }
-
-        // AI 配图凭证保留在 UserDefaults（全局），无需迁移
 
         var profile = AccountProfile()
         profile.name = d.string(forKey: "username") ?? "默认账号"
@@ -165,9 +155,7 @@ final class ProfileManager {
         profile.wechatAppSecret = appSecret
         profile.username = d.string(forKey: "username") ?? ""
         profile.defaultAuthor = d.string(forKey: "defaultAuthor") ?? ""
-        profile.creatorRole = d.string(forKey: "creatorRole") ?? "tech-blogger"
-        profile.writingStyle = d.string(forKey: "writingStyle") ?? "professional"
-        profile.targetAudience = d.string(forKey: "targetAudience") ?? "general"
+        profile.personaId = d.string(forKey: "creatorRole") ?? "tech-blogger"
         profile.needOpenComment = d.object(forKey: "needOpenComment") as? Bool ?? true
         profile.onlyFansCanComment = d.object(forKey: "onlyFansCanComment") as? Bool ?? false
 

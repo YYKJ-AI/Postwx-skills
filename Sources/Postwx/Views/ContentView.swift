@@ -67,6 +67,7 @@ struct ContentView: View {
     @State private var droppedFileURL: URL?
     @State private var showSettings = false
     @State private var showGlobalAISettings = false
+    @State private var showPersonaLibrary = false
     @State private var publishError: String?
     @State private var showOriginalContent = false
     @State private var isHoveringDrop = false
@@ -116,6 +117,16 @@ struct ContentView: View {
                 .controlSize(.large)
                 .disabled(state.isBusy)
 
+                Button { showPersonaLibrary = true } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "person.text.rectangle")
+                            .font(.system(size: 15))
+                        Text("人设")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                }
+                .controlSize(.large)
+
                 Button { showSettings = true } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "gearshape")
@@ -136,6 +147,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showGlobalAISettings) {
             GlobalAISettingsView()
+        }
+        .sheet(isPresented: $showPersonaLibrary) {
+            PersonaLibraryEditorView(state: state)
         }
         .alert("发布失败", isPresented: Binding(
             get: { publishError != nil },
@@ -467,20 +481,10 @@ struct ContentView: View {
                                         .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
                                         .foregroundStyle(.primary)
                                         .lineLimit(1)
-                                    HStack(spacing: 4) {
-                                        if let role = CreatorRole(rawValue: profile.creatorRole) {
-                                            Text(role.displayName)
-                                                .font(.system(size: 10))
-                                                .foregroundStyle(.tertiary)
-                                        }
-                                        if let style = WritingStyle(rawValue: profile.writingStyle) {
-                                            Text("·")
-                                                .font(.system(size: 10))
-                                                .foregroundStyle(.quaternary)
-                                            Text(style.displayName)
-                                                .font(.system(size: 10))
-                                                .foregroundStyle(.tertiary)
-                                        }
+                                    if let persona = PersonaLibrary.shared.persona(id: profile.personaId) {
+                                        Text(persona.displayName)
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(.tertiary)
                                     }
                                 }
 
@@ -916,19 +920,22 @@ struct ContentView: View {
                 }
 
                 if AIService.isAvailable() {
+                    guard let persona = PersonaLibrary.shared.persona(id: state.personaId) else {
+                        state.updateStep(.roleAdaptation, status: .failed("未找到人设配置，请检查设置"))
+                        state.workflowState = .failed("人设配置缺失")
+                        return
+                    }
+
                     state.updateStep(.roleAdaptation, status: .running)
                     state.aiCurrentStep = "角色适配"
                     state.aiStreamingText = ""
                     do {
                         content = try await AIService.adaptRole(
-                            content: content, role: state.creatorRole,
-                            style: state.writingStyle, audience: state.targetAudience,
+                            content: content, persona: persona,
                             onStream: { [state] chunk in Task { @MainActor in state.aiStreamingText += chunk } }
                         )
                         state.content = content
-                        state.updateStep(.roleAdaptation, status: .completed(
-                            "\(state.creatorRole.displayName) · \(state.writingStyle.displayName)"
-                        ))
+                        state.updateStep(.roleAdaptation, status: .completed(persona.displayName))
                     } catch {
                         state.updateStep(.roleAdaptation, status: .failed(error.localizedDescription))
                     }
@@ -938,7 +945,7 @@ struct ContentView: View {
                     state.aiStreamingText = ""
                     do {
                         let deAIResult = try await AIService.deAI(
-                            content: content, writingStyle: state.writingStyle,
+                            content: content, persona: persona,
                             onStream: { [state] chunk in Task { @MainActor in state.aiStreamingText += chunk } }
                         )
                         content = deAIResult.content
@@ -965,7 +972,7 @@ struct ContentView: View {
 
                     state.updateStep(.themeSelection, status: .running)
                     do {
-                        let themeResult = try await AIService.selectTheme(content: content, role: state.creatorRole)
+                        let themeResult = try await AIService.selectTheme(content: content, persona: persona)
                         state.selectedTheme = themeResult.theme
                         state.selectedColor = themeResult.color
                         state.updateStep(.themeSelection, status: .completed(

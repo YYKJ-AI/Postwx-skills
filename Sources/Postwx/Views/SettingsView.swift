@@ -118,8 +118,8 @@ struct SettingsView: View {
                                         .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
                                         .foregroundStyle(.primary)
                                         .lineLimit(1)
-                                    if let role = CreatorRole(rawValue: profile.creatorRole) {
-                                        Text(role.displayName)
+                                    if let persona = PersonaLibrary.shared.persona(id: profile.personaId) {
+                                        Text(persona.displayName)
                                             .font(.system(size: 10))
                                             .foregroundStyle(.tertiary)
                                     }
@@ -212,26 +212,14 @@ struct SettingsView: View {
 
                 // 创作人设
                 SCard(title: "创作人设", icon: "person.text.rectangle.fill", color: Color(hex: 0xF59E0B)) {
-                    VStack(spacing: 10) {
-                        SPickerField("角色", selection: $editingProfile.creatorRole) {
-                            ForEach(CreatorRole.allCases) { role in
-                                Text(role.displayName).tag(role.rawValue)
-                            }
-                        }
-                        SPickerField("风格", selection: $editingProfile.writingStyle) {
-                            ForEach(WritingStyle.allCases) { style in
-                                Text(style.displayName).tag(style.rawValue)
-                            }
-                        }
-                        SPickerField("受众", selection: $editingProfile.targetAudience) {
-                            ForEach(TargetAudience.allCases) { audience in
-                                Text(audience.displayName).tag(audience.rawValue)
-                            }
+                    SPickerField("人设", selection: $editingProfile.personaId) {
+                        ForEach(PersonaLibrary.shared.data.personas) { persona in
+                            Text(persona.displayName).tag(persona.id)
                         }
                     }
 
-                    if let role = CreatorRole(rawValue: editingProfile.creatorRole) {
-                        Text(role.adaptationGuide)
+                    if let persona = PersonaLibrary.shared.persona(id: editingProfile.personaId) {
+                        Text(persona.prompt)
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                             .padding(.top, 2)
