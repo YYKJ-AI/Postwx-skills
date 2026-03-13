@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import WebKit
 
 // MARK: - Design System
 
@@ -71,6 +72,7 @@ struct ContentView: View {
     @State private var publishError: String?
     @State private var showOriginalContent = false
     @State private var isHoveringDrop = false
+    @State private var showPreview = false
     private var profileManager = ProfileManager.shared
 
     var body: some View {
@@ -92,7 +94,21 @@ struct ContentView: View {
             }
 
             ToolbarItemGroup(placement: .automatic) {
-                if state.isReviewing {
+                if !state.content.isEmpty {
+                    Button {
+                        showPreview.toggle()
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: showPreview ? "doc.plaintext" : "iphone")
+                                .font(.system(size: 15))
+                            Text(showPreview ? "编辑" : "预览")
+                                .font(.system(size: 13, weight: .medium))
+                        }
+                    }
+                    .controlSize(.large)
+                }
+
+                if state.isReviewing && !showPreview {
                     Button {
                         showOriginalContent.toggle()
                     } label: {
@@ -141,6 +157,11 @@ struct ContentView: View {
         .onAppear {
             loadCredentials()
         }
+        .onChange(of: state.workflowState) { _, newValue in
+            if newValue == .reviewing {
+                showPreview = true
+            }
+        }
         .sheet(isPresented: $showSettings) {
             SettingsView(state: state)
                 .interactiveDismissDisabled(false)
@@ -168,7 +189,23 @@ struct ContentView: View {
 
     private var editorPanel: some View {
         ZStack {
-            if state.isReviewing && showOriginalContent {
+            if showPreview && !state.content.isEmpty {
+                // WeChat phone preview
+                WeChatPreviewView(
+                    content: state.content,
+                    title: state.title,
+                    author: {
+                        if !state.author.isEmpty { return state.author }
+                        if !state.defaultAuthor.isEmpty { return state.defaultAuthor }
+                        if !state.username.isEmpty { return state.username }
+                        return ""
+                    }(),
+                    theme: state.selectedTheme,
+                    color: state.selectedColor,
+                    inputFormat: state.inputFormat
+                )
+                .background(Color(nsColor: .windowBackgroundColor).opacity(0.3))
+            } else if state.isReviewing && showOriginalContent {
                 originalContentView
             } else if state.content.isEmpty {
                 emptyState
@@ -192,7 +229,7 @@ struct ContentView: View {
                     .allowsHitTesting(false)
             }
         }
-        .background(DS.surfaceInput)
+        .background(showPreview && !state.content.isEmpty ? Color.clear : DS.surfaceInput)
         .animation(.easeOut(duration: 0.2), value: isHoveringDrop)
     }
 
@@ -337,10 +374,6 @@ struct ContentView: View {
                     }
 
                     workflowTimeline
-
-                    if state.isProcessing && !state.aiStreamingText.isEmpty {
-                        aiStreamingOutput
-                    }
 
                     if state.workflowState == .idle {
                         aiStatusCard
@@ -631,58 +664,6 @@ struct ContentView: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: DS.r12))
         }
-    }
-
-    // MARK: - AI Streaming
-
-    private var aiStreamingOutput: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: "waveform")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(DS.brandGradient)
-                    .symbolEffect(.variableColor.iterative, options: .repeating)
-                Text(state.aiCurrentStep.isEmpty ? "AI 输出" : state.aiCurrentStep)
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                ProgressView()
-                    .controlSize(.mini)
-            }
-
-            ScrollViewReader { proxy in
-                ScrollView {
-                    Text(state.aiStreamingText.suffix(1500))
-                        .font(.callout.monospaced())
-                        .foregroundStyle(.secondary.opacity(0.8))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .id("bottom")
-                }
-                .frame(maxHeight: 160)
-                .background(
-                    RoundedRectangle(cornerRadius: DS.r8)
-                        .fill(DS.surfaceInput.opacity(0.5))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: DS.r8)
-                        .stroke(DS.brandGlow.opacity(0.10), lineWidth: 1)
-                )
-                .onChange(of: state.aiStreamingText) {
-                    proxy.scrollTo("bottom", anchor: .bottom)
-                }
-            }
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: DS.r12)
-                .fill(DS.surfacePrimary)
-                .shadow(color: .black.opacity(colorScheme == .dark ? 0.3 : 0.05), radius: 6, y: 3)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: DS.r12)
-                .stroke(DS.borderDefault, lineWidth: 0.5)
-        )
     }
 
     // MARK: - AI Status Card
