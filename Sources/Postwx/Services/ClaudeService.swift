@@ -101,6 +101,16 @@ struct AIService {
 
                     var env = ProcessInfo.processInfo.environment
                     env["CLAUDECODE"] = nil
+                    // 打包后的 app PATH 不含 homebrew 等路径，需要补充以便 claude CLI 找到 node
+                    let extraPaths = [
+                        "/opt/homebrew/bin",
+                        "/opt/homebrew/sbin",
+                        "/opt/homebrew/Caskroom/miniconda/base/bin",
+                        "/usr/local/bin",
+                        NSHomeDirectory() + "/.nvm/versions/node/*/bin",
+                    ]
+                    let currentPath = env["PATH"] ?? "/usr/bin:/bin"
+                    env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
                     process.environment = env
 
                     let stdout = Pipe()

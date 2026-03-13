@@ -1,0 +1,41 @@
+name: Postwx
+options:
+  bundleIdPrefix: com.postwx
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+
+targets:
+  Postwx:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/Postwx
+        excludes:
+          - Info.plist
+    info:
+      path: Sources/Postwx/Info.plist
+      properties:
+        CFBundleName: Postwx
+        CFBundleIdentifier: com.postwx.app
+        CFBundleVersion: "1.0"
+        CFBundleShortVersionString: "1.0"
+        CFBundleExecutable: Postwx
+        CFBundlePackageType: APPL
+        LSMinimumSystemVersion: "14.0"
+        NSPrincipalClass: NSApplication
+    entitlements:
+      path: Sources/Postwx/Postwx.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+        com.apple.security.cs.allow-unsigned-executable-memory: true
+        com.apple.security.cs.disable-library-validation: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.postwx.app
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "6.0"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 8NZ7M4DK8Y
+        ENABLE_HARDENED_RUNTIME: YES
